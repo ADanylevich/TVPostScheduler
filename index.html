@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TV Post Production Scheduler v23</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>TV Post Production Scheduler v23</h1>
+        <div class="button-group top-button-group">
+            <button id="load-hour-long">Load Hour Long Defaults</button>
+            <button id="load-half-hour">Load Half Hour Defaults</button>
+        </div>
+
+        <div class="controls section-grid">
+            <div class="controls-subheading">Project Info</div>
+            <div class="control-group">
+                <label for="created-by">Created By</label>
+                <input type="text" id="created-by" placeholder="Producer Name">
+            </div>
+            <div class="control-group">
+                <label for="show-name">Show Name</label>
+                <input type="text" id="show-name" value="My Awesome Show">
+            </div>
+            <div class="control-group">
+                <label for="show-code">Show Code</label>
+                <input type="text" id="show-code" value="MAS">
+            </div>
+            <div class="control-group">
+                <label for="schedule-version">Version</label>
+                <input type="text" id="schedule-version" value="23.0">
+            </div>
+
+            <div class="controls-subheading">Shoot Parameters</div>
+            <div class="control-group">
+                <label for="start-of-photography">Start of Photography</label>
+                <input type="date" id="start-of-photography" value="2025-07-07">
+            </div>
+            <div class="control-group">
+                <label for="num-episodes">EPs</label>
+                <input type="number" id="num-episodes" value="8" min="1">
+            </div>
+
+            <div class="control-group">
+                <label for="shoot-days-per-ep">Shoot Days / EP</label>
+                <input type="number" id="shoot-days-per-ep" value="5" min="1">
+            </div>
+
+            <div class="control-group">
+                <label for="shoot-day-overrides">Shoot Day Overrides</label>
+                <input type="text" id="shoot-day-overrides" placeholder="e.g., 1:10, 4:9">
+            </div>
+
+            <div class="control-group">
+                <label for="wrap-of-photography">Wrap of Photography</label>
+                <input type="date" id="wrap-of-photography" readonly>
+            </div>
+           
+            <div class="control-group">
+                <label>Total # of Shoot Days</label>
+                <span id="total-shoot-days-display">-</span>
+            </div>
+
+            <div class="controls-subheading">Resource Allocation</div>
+            <div class="control-group">
+                <label for="num-shoot-blocks">Shoot Blocks</label>
+                <input type="number" id="num-shoot-blocks" value="3" min="1">
+            </div>
+            <div class="control-group">
+                <label for="num-editors">Editors</label>
+                <input type="number" id="num-editors" value="3" min="1">
+            </div>
+            <div class="control-group">
+                <label for="num-directors">Directors</label>
+                <input type="number" id="num-directors" value="2" min="1">
+            </div>
+            <div class="control-group">
+                <label for="unlink-on-manual-move" style="margin-right: 10px;">
+                    <input type="checkbox" id="unlink-on-manual-move" style="margin-right: 4px; vertical-align: middle;">
+                    Link Tasks/Events on Drag & Drop
+                </label>
+            </div>
+            <div class="control-group">
+                <label for="toggle-sequential-lock">Require EPs to Lock in Order</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggle-sequential-lock" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="control-group">
+                <label for="producers-cuts-overlap">Producers Cuts Overlap</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="producers-cuts-overlap">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="control-group">
+                <label for="producers-cuts-pre-wrap">Producers Cuts begin Pre-Wrap</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="producers-cuts-pre-wrap">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="collapsible-section holiday-settings">
+            <div class="collapsible-header">
+                <h3>Holidays & Hiatus</h3>
+                <span class="collapsible-icon">+</span>
+            </div>
+            <div class="collapsible-content collapsed">
+                <h4 class="controls-subheading">Holiday Regions</h4>
+                <div id="holiday-region-controls" class="holiday-region-grid"></div>
+                <h4 class="controls-subheading">Hiatus Periods</h4>
+                <div id="hiatus-list"></div>
+                <div style="grid-column: 1 / -1; margin-top: 1rem;">
+                    <button id="add-hiatus-btn" class="primary-action">Add Hiatus</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="collapsible-section schedule-variables">
+            <div class="collapsible-header">
+                <h3>Schedule Variables (in Business Days)</h3>
+                <span class="collapsible-icon">+</span>
+            </div>
+            <div class="collapsible-content collapsed">
+                <div class="control-group"><label for="editors-cut-days">Editor's Cut</label><input type="number" id="editors-cut-days" value="3" min="1"></div>
+                <div class="control-group"><label for="directors-cut-days">Director's Cut</label><input type="number" id="directors-cut-days" value="4" min="1"></div>
+                <div class="control-group"><label for="producers-cut-days">Producer's Cut</label><input type="number" id="producers-cut-days" value="10" min="1"></div>
+                <div class="control-group"><label for="studio-notes-days">Notes</label><input type="number" id="studio-notes-days" value="2" min="1"></div>
+                <div class="control-group"><label for="network-cut-days">Studio/Network Cut</label><input type="number" id="network-cut-days" value="4" min="1"></div>
+                <div class="control-group"><label for="picture-lock-days">Picture Lock</label><input type="number" id="picture-lock-days" value="3" min="1"></div>
+                <div class="control-group"><label for="finishing-period-weeks">Finishing Period (Wks)</label><input type="number" id="finishing-period-weeks" value="10" min="1"></div>
+                <div class="control-group"><label for="online-days">Online</label><input type="number" id="online-days" value="1" min="1"></div>
+                <div class="control-group"><label for="color-grade-days">Color Grade</label><input type="number" id="color-grade-days" value="3" min="1"></div>
+                <div class="control-group"><label for="pre-mix-days">Pre-Mix</label><input type="number" id="pre-mix-days" value="2" min="1"></div>
+                <div class="control-group"><label for="final-mix-days">Final Mix</label><input type="number" id="final-mix-days" value="3" min="1"></div>
+                <div class="control-group"><label for="mix-review-days">Mix Review</label><input type="number" id="mix-review-days" value="1" min="1"></div>
+                <div class="control-group"><label for="final-mix-fixes-days">Final Mix Fixes</label><input type="number" id="final-mix-fixes-days" value="1" min="1"></div>
+                <div class="control-group"><label for="days-to-air">Calendar Days/Weeks to Air</label><input type="number" id="days-to-air" value="98"></div>
+                <div class="control-group"><label for="air-unit">Air Unit</label><select id="air-unit"><option value="days">Days</option><option value="weeks">Weeks</option></select></div>
+                <div id="studio-cuts-per-episode-container" class="studio-cuts-group"></div>
+                <div class="control-group" style="grid-column: 1/-1; border-top: 1px solid var(--slate-200); padding-top: 1.5rem; margin-top: 1rem;">
+                    <h4 class="controls-subheading" style="margin-top: 0; padding-top: 0;">6th Day Work Authorizations</h4>
+                    <div id="sixth-day-list" style="margin-top: 1rem;"></div>
+                    <button id="add-sixth-day-btn" class="primary-action" style="max-width: 150px;">Add 6th Day</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="collapsible-section block-assignments">
+            <div class="collapsible-header">
+                <h3>Shoot Block Assignments</h3>
+                <span class="collapsible-icon">+</span>
+            </div>
+            <div id="block-distribution-container" class="collapsible-content collapsed block-distribution-group"></div>
+        </div>
+        
+        <div class="collapsible-section personnel-assignments">
+            <div class="collapsible-header">
+                <h3>Personnel Assignments</h3>
+                <span class="collapsible-icon">+</span>
+            </div>
+            <div class="collapsible-content collapsed">
+                <div id="editors-assignments" class="personnel-group"></div>
+                <div id="directors-assignments" class="personnel-group"></div>
+            </div>
+        </div>
+        
+        <div class="view-controls">
+            <div class="control-section">
+                <span class="control-section-header">Views</span>
+                <div class="tabs button-group">
+                    <button id="tab-timeline" class="tab-button active">Timeline</button>
+                    <button id="tab-waterfall" class="tab-button">Waterfall</button>
+                    <button id="tab-grid" class="tab-button">Grid</button>
+                    <button id="tab-budget" class="tab-button">Budget</button>
+                </div>
+            </div>
+            <div class="control-section">
+                <span class="control-section-header">Custom Events</span>
+                <div class="button-group">
+                    <button id="create-new-event-btn" class="primary-action">Create</button>
+                    <button id="manage-events-btn">Manage</button>
+                </div>
+            </div>
+            <div class="control-section">
+                <span class="control-section-header">Data & Exports</span>
+                <div class="export-buttons button-group">
+                    <button id="save-schedule-btn" class="primary-action">Save</button>
+                    <button id="load-schedule-btn">Load</button>
+                    <button id="export-smart" class="smart-export-button">Timeline (XLSX)</button>
+                    <button id="export-calendar">Calendar (.ics)</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="timeline-view" class="view-container">
+            <div id="gantt-outer-wrapper"><div id="gantt-container"></div></div>
+        </div>
+        <div id="waterfall-view" class="view-container hidden">
+            <div id="waterfall-outer-wrapper"><div id="waterfall-container"></div></div>
+        </div>
+        <div id="grid-view" class="view-container hidden">
+            <div id="grid-outer-wrapper"><table id="schedule-grid"></table></div>
+        </div>
+        <div id="budget-view" class="view-container hidden">
+            </div>
+        
+        <div id="app-Dr_g0n-container"></div>
+    </div>
+
+    <div id="event-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Create New Event</h2>
+                <button id="modal-close-btn" class="modal-close-button">&times;</button>
+            </div>
+            <form id="event-form">
+                <input type="hidden" id="edit-task-id">
+                <div class="modal-body">
+                    <div class="control-group"><label for="task-name">Task Name</label><input type="text" id="task-name" required></div>
+                    <div class="control-group half-width"><label for="task-episode">Episode</label><select id="task-episode" required></select></div>
+                    <div class="control-group half-width"><label for="task-department">Department</label><select id="task-department" required></select></div>
+                    <div class="control-group half-width"><label for="task-start-date">Start Date</label><input type="date" id="task-start-date" required></div>
+                    <div class="control-group half-width"><label for="task-duration">Duration (days)</label><input type="number" id="task-duration" value="1" min="1" required></div>
+                    <div class="control-group"><label for="task-assignee">Assigned To (Optional)</label><input type="text" id="task-assignee" placeholder="e.g., Director X, Mixer A"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="modal-delete-btn" class="delete-button" style="display:none;">Delete</button>
+                    <div class="right-buttons">
+                        <button type="button" id="modal-cancel-btn">Cancel</button>
+                        <button type="submit" id="modal-submit-btn" class="primary-action">Create Event</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="manage-events-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Custom Events</h2>
+                <button id="manage-modal-close-btn" class="modal-close-button">&times;</button>
+            </div>
+            <div id="custom-event-list" class="modal-body"></div>
+        </div>
+    </div>
+
+    <div id="hiatus-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="hiatus-modal-title">Add Hiatus</h2>
+                <button id="hiatus-modal-close-btn" class="modal-close-button">&times;</button>
+            </div>
+            <form id="hiatus-form">
+                <input type="hidden" id="edit-hiatus-id">
+                <div class="modal-body">
+                    <div class="control-group"><label for="hiatus-name">Hiatus Name</label><input type="text" id="hiatus-name" required></div>
+                    <div class="control-group half-width"><label for="hiatus-start-date">Start Date</label><input type="date" id="hiatus-start-date" required></div>
+                    <div class="control-group half-width"><label for="hiatus-end-date">End Date</label><input type="date" id="hiatus-end-date" required></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="hiatus-modal-delete-btn" class="delete-button" style="display:none;">Delete</button>
+                    <div class="right-buttons">
+                        <button type="button" id="hiatus-modal-cancel-btn">Cancel</button>
+                        <button type="submit" id="hiatus-modal-submit-btn" class="primary-action">Add Hiatus</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="sixth-day-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="sixth-day-modal-title">Add 6th Day Work</h2>
+                <button id="sixth-day-modal-close-btn" class="modal-close-button">&times;</button>
+            </div>
+            <form id="sixth-day-form">
+                <div class="modal-body">
+                    <div class="control-group"><label for="sixth-day-date">Date</label><input type="date" id="sixth-day-date" required></div>
+                    <div class="control-group"><label for="sixth-day-scope">Applies To</label><select id="sixth-day-scope"><option value="all">Entire Schedule</option><option value="episode">Specific Episode</option><option value="resource">Specific Resource</option></select></div>
+                    <div class="control-group" id="sixth-day-value-group" style="display: none;"><label for="sixth-day-value-select">Which one?</label><select id="sixth-day-value-select"></select></div>
+                </div>
+                <div class="modal-footer">
+                    <div class="right-buttons">
+                        <button type="button" id="sixth-day-modal-cancel-btn">Cancel</button>
+                        <button type="submit" id="sixth-day-modal-submit-btn" class="primary-action">Add 6th Day</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
