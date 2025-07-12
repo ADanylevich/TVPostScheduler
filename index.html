@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TV Post Production Scheduler v23</title>
+    <title>TV Post Production Scheduler (Beta v2.31)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -14,7 +14,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>TV Post Production Scheduler v23</h1>
+        <h1>TV Post Production Scheduler (Beta v2.31)</h1>
         <div class="button-group top-button-group">
             <button id="load-hour-long">Load Hour Long Defaults</button>
             <button id="load-half-hour">Load Half Hour Defaults</button>
@@ -36,7 +36,7 @@
             </div>
             <div class="control-group">
                 <label for="schedule-version">Version</label>
-                <input type="text" id="schedule-version" value="23.0">
+                <input type="text" id="schedule-version" value="1.0">
             </div>
 
             <div class="controls-subheading">Shoot Parameters</div>
@@ -202,6 +202,8 @@
                     <button id="export-calendar">Calendar (.ics)</button>
                 </div>
             </div>
+            
+
         </div>
 
         <div id="timeline-view" class="view-container">
@@ -211,8 +213,15 @@
             <div id="waterfall-outer-wrapper"><div id="waterfall-container"></div></div>
         </div>
         <div id="grid-view" class="view-container hidden">
+            <div class="control-section">
+                <span class="control-section-header">Grid Export Options</span>
+                <div class="button-group">
+                    <button id="configure-grid-export-btn">Configure Columns</button>
+                </div>
+            </div>
             <div id="grid-outer-wrapper"><table id="schedule-grid"></table></div>
         </div>
+
         <div id="budget-view" class="view-container hidden">
             </div>
         
@@ -299,6 +308,24 @@
                     </div>
                 </div>
             </form>
+        </div>
+    </div>
+    <div id="grid-column-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configure Grid Columns for Export</h2>
+                <button id="grid-column-modal-close-btn" class="modal-close-button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Select the columns to include in the PDF export:</p>
+                <div id="grid-column-checkboxes">
+                    <!-- Checkboxes will be generated here by JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="grid-column-modal-cancel-btn">Cancel</button>
+                <button type="button" id="grid-column-modal-save-btn" class="primary-action">Save Selection</button>
+            </div>
         </div>
     </div>
 

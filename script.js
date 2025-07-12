@@ -14,6 +14,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let viewState = { timeline: 'fresh', waterfall: 'stale', grid: 'fresh', budget: 'stale' };
     let hiatuses = [];
     let sixthDayWorkDates = [];
+    let gridVisibleColumns = null;
+    // Base columns for the grid view. Dynamic columns for S/N cuts are added separately.
+    const allGridColumns = ['Block', 'Director', 'Editor', 'Shoot Dates', "Editor's Cut", "Director's Cut", "Producer's Cut", 'Lock', 'Color', 'Final Mix', 'QC Delivery', 'Final Delivery', 'Earliest Release'];
+
 
     const taskColors = {
         "SHOOT": "#6c757d", "Editor's Cut": "#2a9d8f", "Director's Cut": "#e9c46a", "Producer Notes": "#a8dadc",
@@ -24,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
         "M&E": "#386641", "M&E Delivery": "#2B580C", "Deliver to QC v1": "#ffb703", "Final Delivery": "#fb8500",
         "Earliest Possible Release": "#457b9d"
     };
-    // "Dr_g0n"
     const AppDr_g0n = atob('VFYgUG9zdCBQcm9kdWN0aW9uIFNjaGVkdWxlciBBcHAgRGVzaWduZWQgYnkgQW5kcmUgRGFueWxldmljaA==');
     
     // --- CORE ACTIONS & ORCHESTRATION ---
@@ -170,22 +173,25 @@ document.addEventListener('DOMContentLoaded', () => {
              fringeRate: 500
         }));
 
-    document.querySelector('.personnel-assignments').addEventListener('change', (e) => {
-        if (e.target.matches('select')) {
-            debouncedGenerate();
-        }
-    });
+        document.querySelector('.personnel-assignments').addEventListener('change', (e) => {
+            if (e.target.matches('select')) {
+                debouncedGenerate();
+            }
+        });
 
-    document.querySelector('.personnel-assignments').addEventListener('input', (e) => {
-        if (e.target.matches('input[type="text"]')) {
-            debouncedGenerate();
-        }
-    });
+        document.querySelector('.personnel-assignments').addEventListener('input', (e) => {
+            if (e.target.matches('input[type="text"]')) {
+                debouncedGenerate();
+            }
+        });
         generatePersonnelFields();
         generateBlockFields(); 
         initializeDefaultHiatus();
         updateWrapDate();
         fullRegeneration();
+        // After regeneration, set the visible columns to all available columns by default.
+        gridVisibleColumns = getCurrentAllGridColumns();
+        renderGridView();
     }
 
     
@@ -196,15 +202,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 if(id === 'show-name') autoPopulateShowCode(e.target.value);
                 return; 
             }
-            if (id.startsWith('num-') || id.includes('shoot-days-per-ep') || id.includes('shoot-day-overrides') || id.includes('num-shoot-blocks')) {
+            if (id.startsWith('num-') || id.includes('shoot-days-per-ep') || id.includes('shoot-day-overrides') || id.includes('num-shoot-blocks') || id.startsWith('ep-studio-cuts-')) {
                 if (id === 'num-editors') {
                     updateBudgetForEditorCount();
                 }
-                generatePersonnelFields();
-                generateStudioCutFields();
-                generateBlockFields();
+                if (id.startsWith('num-')) {
+                    generatePersonnelFields();
+                    generateStudioCutFields();
+                    generateBlockFields();
+                }
                 updateWrapDate();
                 fullRegeneration();
+                // After a change that could affect the number of S/N cuts, update the default visible columns
+                gridVisibleColumns = getCurrentAllGridColumns();
+                renderGridView();
             } else {
                 debouncedGenerate();
             }
@@ -235,7 +246,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isExpanded = header.classList.toggle('expanded');
                 content.classList.toggle('collapsed');
                 
-                // This is the only part that needs changing in this function
                 const icon = header.querySelector('.collapsible-icon');
                 if (icon) {
                     icon.textContent = isExpanded ? '−' : '+';
@@ -259,7 +269,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="number" id="ep-studio-cuts-${i}" value="${epDefault}" min="0">
                 </div>`;
             container.insertAdjacentHTML('beforeend', cutEntryHTML);
-            document.getElementById(`ep-studio-cuts-${i}`).addEventListener('input', debouncedGenerate);
+            // Re-add event listener here since we are regenerating the element
+            document.getElementById(`ep-studio-cuts-${i}`).addEventListener('input', (e) => {
+                fullRegeneration();
+                gridVisibleColumns = getCurrentAllGridColumns();
+                renderGridView();
+            });
         }
     }
 
@@ -1317,13 +1332,42 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // --- NEW HELPER FUNCTIONS for Grid Columns ---
+    function getMaxStudioCuts() {
+        let maxCuts = 0;
+        if (!episodesData || episodesData.length === 0) return 0;
+        episodesData.forEach((ep, epId) => {
+            const epTasks = masterTaskList.filter(t => t.epId === epId && t.isScheduled);
+            const studioCuts = epTasks.filter(t => t.info.name.startsWith("Studio/Network Cut"));
+            if (studioCuts.length > maxCuts) {
+                maxCuts = studioCuts.length;
+            }
+        });
+        return maxCuts;
+    }
+
+    function getCurrentAllGridColumns() {
+        const dynamicColumns = [...allGridColumns];
+        const maxCuts = getMaxStudioCuts();
+        const producersCutIndex = dynamicColumns.indexOf("Producer's Cut");
+        for (let i = 1; i <= maxCuts; i++) {
+            dynamicColumns.splice(producersCutIndex + i, 0, `S/N Cut #${i}`);
+        }
+        return dynamicColumns;
+    }
+
     function renderGridView() {
         const table = document.getElementById('schedule-grid');
         table.innerHTML = '';
         if (episodesData.length === 0) return;
+        
+        // If columns haven't been configured yet (e.g., first run), set them to all available.
+        if (!gridVisibleColumns) {
+            gridVisibleColumns = getCurrentAllGridColumns();
+        }
 
         const formatDate = (date) => date ? new Date(date).toLocaleDateString('en-US', { year: '2-digit', month: '2-digit', day: '2-digit', timeZone: 'UTC' }) : 'N/A';
-        let maxStudioCuts = 0;
+        const maxStudioCuts = getMaxStudioCuts();
 
         const gridData = episodesData.map((ep, epId) => {
             const epTasks = masterTaskList.filter(t => t.epId === epId && t.isScheduled);
@@ -1341,10 +1385,6 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             const studioCuts = findDates("Studio/Network Cut");
-            if (studioCuts.length > maxStudioCuts) {
-                maxStudioCuts = studioCuts.length;
-            }
-
             const shootingBlocks = getShootingBlocks();
             const blockInfo = shootingBlocks.find(b => b.episodes.includes(epId));
 
@@ -1381,14 +1421,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-
-        const mainHeaders = ['Block', 'EP', 'Director', 'Editor', 'Shoot Dates', "Editor's Cut", "Director's Cut", "Producer's Cut"];
-        for (let i = 1; i <= maxStudioCuts; i++) {
-            mainHeaders.push(`S/N Cut #${i}`);
-        }
-        mainHeaders.push('Lock', 'Color', 'Final Mix', 'QC Delivery', 'Final Delivery', 'Earliest Release');
         
-        const totalCols = mainHeaders.length;
+        const currentAllCols = getCurrentAllGridColumns();
+        const displayedHeaders = currentAllCols.filter(col => gridVisibleColumns.includes(col));
+        if (!displayedHeaders.includes('EP')) {
+            displayedHeaders.unshift('EP');
+        }
+
+        const totalCols = displayedHeaders.length;
         const createdBy = document.getElementById('created-by').value;
         const showName = document.getElementById('show-name').value;
         const version = document.getElementById('schedule-version').value;
@@ -1412,22 +1452,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </th>
             </tr>
-            <tr>${mainHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
+            <tr>${displayedHeaders.map(h => `<th>${h}</th>`).join('')}</tr>
         </thead>`;
 
         let bodyHTML = '<tbody>';
         gridData.forEach(row => {
             bodyHTML += '<tr>';
-            if (row.blockRowspan > 0) bodyHTML += `<td rowspan="${row.blockRowspan}">${row.block}</td>`;
+            if (gridVisibleColumns.includes('Block') && row.blockRowspan > 0) bodyHTML += `<td rowspan="${row.blockRowspan}">${row.block}</td>`;
             bodyHTML += `<td>${row.ep}</td>`;
-            if (row.directorRowspan > 0) bodyHTML += `<td rowspan="${row.directorRowspan}">${row.director}</td>`;
-            bodyHTML += `<td>${row.editor}</td>`;
-            if (row.shootDatesRowspan > 0) bodyHTML += `<td rowspan="${row.shootDatesRowspan}">${row.shootDates}</td>`;
-            bodyHTML += `<td>${row.editorsCut}</td><td>${row.directorsCut}</td><td>${row.producersCut}</td>`;
+            if (gridVisibleColumns.includes('Director') && row.directorRowspan > 0) bodyHTML += `<td rowspan="${row.directorRowspan}">${row.director}</td>`;
+            if (gridVisibleColumns.includes('Editor')) bodyHTML += `<td>${row.editor}</td>`;
+            if (gridVisibleColumns.includes('Shoot Dates') && row.shootDatesRowspan > 0) bodyHTML += `<td rowspan="${row.shootDatesRowspan}">${row.shootDates}</td>`;
+            if (gridVisibleColumns.includes("Editor's Cut")) bodyHTML += `<td>${row.editorsCut}</td>`;
+            if (gridVisibleColumns.includes("Director's Cut")) bodyHTML += `<td>${row.directorsCut}</td>`;
+            if (gridVisibleColumns.includes("Producer's Cut")) bodyHTML += `<td>${row.producersCut}</td>`;
+            
             for (let i = 0; i < maxStudioCuts; i++) {
-                bodyHTML += `<td>${row.studioCuts[i] || ''}</td>`;
+                if (gridVisibleColumns.includes(`S/N Cut #${i + 1}`)) {
+                    bodyHTML += `<td>${row.studioCuts[i] || ''}</td>`;
+                }
             }
-            bodyHTML += `<td>${row.lock}</td><td>${row.color}</td><td>${row.finalMix}</td><td>${row.qcDelivery}</td><td>${row.finalDelivery}</td><td>${row.earliestRelease}</td>`;
+
+            if (gridVisibleColumns.includes('Lock')) bodyHTML += `<td>${row.lock}</td>`;
+            if (gridVisibleColumns.includes('Color')) bodyHTML += `<td>${row.color}</td>`;
+            if (gridVisibleColumns.includes('Final Mix')) bodyHTML += `<td>${row.finalMix}</td>`;
+            if (gridVisibleColumns.includes('QC Delivery')) bodyHTML += `<td>${row.qcDelivery}</td>`;
+            if (gridVisibleColumns.includes('Final Delivery')) bodyHTML += `<td>${row.finalDelivery}</td>`;
+            if (gridVisibleColumns.includes('Earliest Release')) bodyHTML += `<td>${row.earliestRelease}</td>`;
             bodyHTML += '</tr>';
         });
         bodyHTML += '</tbody>';
@@ -1580,7 +1631,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chart.innerHTML = headerHTML + bodyHTML;
         container.appendChild(chart);
     }
-    // NEW: Function to parse the override string
+
     function getShootDayOverrides() {
         const overrides = {};
         const overrideString = document.getElementById('shoot-day-overrides').value.trim();
@@ -1601,55 +1652,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getShootingBlocks() {
-    const numBlocks = parseInt(document.getElementById('num-shoot-blocks').value);
-    const numEpisodes = parseInt(document.getElementById('num-episodes').value);
-    // MODIFICATION: Get default shoot days and overrides
-    const defaultShootDaysPerEp = parseInt(document.getElementById('shoot-days-per-ep').value);
-    const shootDayOverrides = getShootDayOverrides();
-    const startOfPhotographyValue = document.getElementById('start-of-photography').value;
-    if (!startOfPhotographyValue) return [];
+        const numBlocks = parseInt(document.getElementById('num-shoot-blocks').value);
+        const numEpisodes = parseInt(document.getElementById('num-episodes').value);
+        const defaultShootDaysPerEp = parseInt(document.getElementById('shoot-days-per-ep').value);
+        const shootDayOverrides = getShootDayOverrides();
+        const startOfPhotographyValue = document.getElementById('start-of-photography').value;
+        if (!startOfPhotographyValue) return [];
 
-    const startOfPhotography = new Date(startOfPhotographyValue + 'T12:00:00Z');
+        const startOfPhotography = new Date(startOfPhotographyValue + 'T12:00:00Z');
 
-    const shootingBlocks = [];
-    let currentStartDate = new Date(startOfPhotography.getTime());
-    let episodeCounter = 0;
+        const shootingBlocks = [];
+        let currentStartDate = new Date(startOfPhotography.getTime());
+        let episodeCounter = 0;
 
-    // NEW: Helper function to get shoot days for a specific episode
-    const getShootDaysForEp = (epId) => shootDayOverrides[epId] !== undefined ? shootDayOverrides[epId] : defaultShootDaysPerEp;
+        const getShootDaysForEp = (epId) => shootDayOverrides[epId] !== undefined ? shootDayOverrides[epId] : defaultShootDaysPerEp;
 
-    if (numBlocks === 1) {
-        // MODIFICATION: Sum up shoot days considering overrides
-        let totalShootDays = 0;
-        const blockEpisodes = [];
-        for (let i = 0; i < numEpisodes; i++) {
-            totalShootDays += getShootDaysForEp(i);
-            blockEpisodes.push(i);
+        if (numBlocks === 1) {
+            let totalShootDays = 0;
+            const blockEpisodes = [];
+            for (let i = 0; i < numEpisodes; i++) {
+                totalShootDays += getShootDaysForEp(i);
+                blockEpisodes.push(i);
+            }
+            const blockEndDate = addBusinessDays(currentStartDate, totalShootDays, 'SHOOT');
+            shootingBlocks.push({ blockIndex: 0, episodes: blockEpisodes, startDate: currentStartDate, endDate: blockEndDate });
+            return shootingBlocks;
         }
-        const blockEndDate = addBusinessDays(currentStartDate, totalShootDays, 'SHOOT');
-        shootingBlocks.push({ blockIndex: 0, episodes: blockEpisodes, startDate: currentStartDate, endDate: blockEndDate });
+
+        for (let i = 0; i < numBlocks; i++) {
+            const blockEpsInput = document.getElementById(`block-eps-${i}`);
+            if (!blockEpsInput) continue;
+            const epsInBlock = parseInt(blockEpsInput.value);
+
+            let blockShootDays = 0;
+            const blockEpisodes = [];
+            for(let j=0; j < epsInBlock && episodeCounter < numEpisodes; j++) {
+                blockShootDays += getShootDaysForEp(episodeCounter);
+                blockEpisodes.push(episodeCounter++);
+            }
+
+            const blockEndDate = addBusinessDays(currentStartDate, blockShootDays, 'SHOOT');
+            shootingBlocks.push({ blockIndex: i, episodes: blockEpisodes, startDate: currentStartDate, endDate: blockEndDate });
+            currentStartDate = findNextBusinessDay(blockEndDate, 'SHOOT');
+        }
         return shootingBlocks;
     }
-
-    for (let i = 0; i < numBlocks; i++) {
-        const blockEpsInput = document.getElementById(`block-eps-${i}`);
-        if (!blockEpsInput) continue;
-        const epsInBlock = parseInt(blockEpsInput.value);
-
-        // MODIFICATION: Sum up shoot days for the block considering overrides
-        let blockShootDays = 0;
-        const blockEpisodes = [];
-        for(let j=0; j < epsInBlock && episodeCounter < numEpisodes; j++) {
-            blockShootDays += getShootDaysForEp(episodeCounter);
-            blockEpisodes.push(episodeCounter++);
-        }
-
-        const blockEndDate = addBusinessDays(currentStartDate, blockShootDays, 'SHOOT');
-        shootingBlocks.push({ blockIndex: i, episodes: blockEpisodes, startDate: currentStartDate, endDate: blockEndDate });
-        currentStartDate = findNextBusinessDay(blockEndDate, 'SHOOT');
-    }
-    return shootingBlocks;
-}
     
     // --- UI INTERACTION (Event Delegation for Expand/Collapse) ---
     function setupAllEventListeners() {
@@ -1916,7 +1963,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let icsString = [
                 'BEGIN:VCALENDAR',
                 'VERSION:2.0',
-                'PRODID:-//GeminiScheduler//v22.0//EN',
+                'PRODID:-//GeminiScheduler//Beta v2.31//EN',
                 `X-WR-CALNAME:${document.getElementById('show-code').value} - ${dept}`
             ];
 
@@ -1962,6 +2009,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.removeChild(link);
         });
     }
+
 
     function getExportHeaderAOA() {
         return [
@@ -2077,6 +2125,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
+        doc.setFontSize(8);
+        doc.setTextColor(128, 128, 128); // Set color to grey
         doc.text(AppDr_g0n, 40, doc.lastAutoTable.finalY + 20);
 
         const filename = `${generateExportFilename()}_GRID`;
@@ -2777,6 +2827,53 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    function setupColumnConfigModal() {
+        const modal = document.getElementById('grid-column-modal');
+        const openBtn = document.getElementById('configure-grid-export-btn');
+        const closeBtn = document.getElementById('grid-column-modal-close-btn');
+        const cancelBtn = document.getElementById('grid-column-modal-cancel-btn');
+        const saveBtn = document.getElementById('grid-column-modal-save-btn');
+        const checkboxContainer = document.getElementById('grid-column-checkboxes');
+
+        openBtn.addEventListener('click', () => {
+            checkboxContainer.innerHTML = ''; // Clear previous
+            const currentCols = getCurrentAllGridColumns();
+            currentCols.forEach(colName => {
+                const isChecked = gridVisibleColumns.includes(colName);
+                const checkboxId = `col-toggle-${colName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                const item = document.createElement('div');
+                item.innerHTML = `
+                    <label for="${checkboxId}">
+                        <input type="checkbox" id="${checkboxId}" value="${colName}" ${isChecked ? 'checked' : ''}>
+                        ${colName}
+                    </label>
+                `;
+                checkboxContainer.appendChild(item);
+            });
+            modal.style.display = 'flex';
+        });
+
+        const closeModal = () => {
+            modal.style.display = 'none';
+        };
+
+        closeBtn.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const newVisibleColumns = [];
+            checkboxContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                newVisibleColumns.push(checkbox.value);
+            });
+            gridVisibleColumns = newVisibleColumns;
+            renderGridView(); // Re-render the grid with new columns
+            closeModal();
+        });
+    }
     
     // --- SAVE/LOAD FUNCTIONALITY ---
     document.getElementById('save-schedule-btn').addEventListener('click', () => {
@@ -2792,7 +2889,8 @@ document.addEventListener('DOMContentLoaded', () => {
             episodes: cleanEpisodesData,
             hiatuses: hiatuses,
             sixthDayWorkDates: sixthDayWorkDates,
-            budget: budgetData
+            budget: budgetData,
+            gridVisibleColumns: gridVisibleColumns
         };
         
         document.querySelectorAll('.controls input, .controls select, .schedule-variables input, .personnel-assignments input, .personnel-assignments select, .block-assignments input, .holiday-settings input, .holiday-settings select, #budget-view input, #budget-view select').forEach(el => {
@@ -2836,7 +2934,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const content = readerEvent.target.result;
                     const state = JSON.parse(content);
 
-                     hiatuses = state.hiatuses || [];
+                    hiatuses = state.hiatuses || [];
                     sixthDayWorkDates = state.sixthDayWorkDates || [];
                     budgetData = state.budget || {};
 
@@ -2885,6 +2983,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         });
                     }
+                    
+                    // Load column visibility, or set to default if not present
+                    gridVisibleColumns = state.gridVisibleColumns || getCurrentAllGridColumns();
 
                     updateWrapDate();
                     renderHiatusList();
@@ -3319,6 +3420,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupModal();
         setupHiatusModal();
         setupSixthDayModal();
+        setupColumnConfigModal();
         loadDefaults('hour-long');
         document.getElementById('app-Dr_g0n-container').innerHTML = AppDr_g0n;
         setupAllEventListeners();
