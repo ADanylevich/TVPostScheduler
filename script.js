@@ -1,6 +1,25 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- USER PREFERENCE: Unlink on manual move toggle ---
     const unlinkToggle = document.getElementById('unlink-on-manual-move');
+
+    // --- CONTEXT-INDEPENDENT UUID GENERATOR ---
+    function generateUUID() {
+        // A robust fallback that does not rely on the crypto library.
+        let
+            d = new Date().getTime(),
+            d2 = (performance && performance.now && (performance.now() * 1000)) || 0;
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            let r = Math.random() * 16;
+            if (d > 0) {
+                r = (d + r) % 16 | 0;
+                d = Math.floor(d / 16);
+            } else {
+                r = (d2 + r) % 16 | 0;
+                d2 = Math.floor(d2 / 16);
+            }
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    }
     
     // --- GLOBAL STATE & CONFIGURATION ---
     let masterTaskList = [];
@@ -15,9 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hiatuses = [];
     let sixthDayWorkDates = [];
     let gridVisibleColumns = null;
-    // Base columns for the grid view. Dynamic columns for S/N cuts are added separately.
     const allGridColumns = ['Block', 'Director', 'Editor', 'Shoot Dates', "Editor's Cut", "Director's Cut", "Producer's Cut", 'Lock', 'Color', 'Final Mix', 'QC Delivery', 'Final Delivery', 'Earliest Release'];
-
 
     const taskColors = {
         "SHOOT": "#6c757d", "Editor's Cut": "#2a9d8f", "Director's Cut": "#e9c46a", "Producer Notes": "#a8dadc",
@@ -104,51 +121,51 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('finishing-period-weeks').value = 6;
         }
         
-        generateStudioCutFields(); // Call this here to set default values correctly
+        generateStudioCutFields(); 
         
         const staffItems = [
-            { id: crypto.randomUUID(), desc: 'Post Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 1800, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 1800, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
         ];
 
         const editorialItems = [];
         for (let i = 0; i < numEditors; i++) {
-            editorialItems.push({ id: crypto.randomUUID(), desc: `Editor ${i+1}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 });
-            editorialItems.push({ id: crypto.randomUUID(), desc: `Assistant Editor ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 });
+            editorialItems.push({ id: generateUUID(), desc: `Editor ${i+1}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 });
+            editorialItems.push({ id: generateUUID(), desc: `Assistant Editor ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 });
         }
-        editorialItems.push({ id: crypto.randomUUID(), desc: 'VFX Editor', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 40 });
-        editorialItems.push({ id: crypto.randomUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
+        editorialItems.push({ id: generateUUID(), desc: 'VFX Editor', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 40 });
+        editorialItems.push({ id: generateUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
 
         const vfxItems = [
-            { id: crypto.randomUUID(), desc: 'VFX Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 5000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Wrangler', num: 1, prep: 0, shoot: 10, post: 0, wrap: 0, rate: 2200, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 5000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Wrangler', num: 1, prep: 0, shoot: 10, post: 0, wrap: 0, rate: 2200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
         ];
         
         const roomItems = [
-            { id: crypto.randomUUID(), desc: 'Post Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'Post Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Coordinator Room', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 350, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'Post Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'Post Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Coordinator Room', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 350, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
         ];
         for (let i = 0; i < numEditors; i++) {
-            roomItems.push({ id: crypto.randomUUID(), desc: `Editor Bay ${i+1}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-            roomItems.push({ id: crypto.randomUUID(), desc: `Assistant Editor Bay ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+            roomItems.push({ id: generateUUID(), desc: `Editor Bay ${i+1}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+            roomItems.push({ id: generateUUID(), desc: `Assistant Editor Bay ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
         }
 
         const equipmentItems = [];
          for (let i = 0; i < numEditors; i++) {
-            equipmentItems.push({ id: crypto.randomUUID(), desc: `AVID Rental (Editor ${i+1})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-            equipmentItems.push({ id: crypto.randomUUID(), desc: `AVID Rental (Assistant Editor ${i+1})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+            equipmentItems.push({ id: generateUUID(), desc: `AVID Rental (Editor ${i+1})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+            equipmentItems.push({ id: generateUUID(), desc: `AVID Rental (Assistant Editor ${i+1})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
         }
-        equipmentItems.push({ id: crypto.randomUUID(), desc: 'AVID Rental (VFX Editor)', num: 1, prep: 0, shoot: 0, post: 20, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-        equipmentItems.push({ id: crypto.randomUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
+        equipmentItems.push({ id: generateUUID(), desc: 'AVID Rental (VFX Editor)', num: 1, prep: 0, shoot: 0, post: 20, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+        equipmentItems.push({ id: generateUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
 
         budgetData = {
             "Post-Production Staff": staffItems,
@@ -161,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const boxRentalEligible = [...staffItems, ...editorialItems, ...vfxItems].filter(item => !item.desc.toLowerCase().includes('mx editor'));
         budgetData["Box Rentals"] = boxRentalEligible.map(item => ({
-             id: crypto.randomUUID(), 
+             id: generateUUID(), 
              desc: `Box Rental (${item.desc})`, 
              num: item.num, 
              prep: item.prep, 
@@ -189,7 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeDefaultHiatus();
         updateWrapDate();
         fullRegeneration();
-        // After regeneration, set the visible columns to all available columns by default.
         gridVisibleColumns = getCurrentAllGridColumns();
         renderGridView();
     }
@@ -213,7 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 updateWrapDate();
                 fullRegeneration();
-                // After a change that could affect the number of S/N cuts, update the default visible columns
                 gridVisibleColumns = getCurrentAllGridColumns();
                 renderGridView();
             } else {
@@ -269,7 +284,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="number" id="ep-studio-cuts-${i}" value="${epDefault}" min="0">
                 </div>`;
             container.insertAdjacentHTML('beforeend', cutEntryHTML);
-            // Re-add event listener here since we are regenerating the element
             document.getElementById(`ep-studio-cuts-${i}`).addEventListener('input', (e) => {
                 fullRegeneration();
                 gridVisibleColumns = getCurrentAllGridColumns();
@@ -659,7 +673,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- TASK & SCHEDULE CALCULATION ---
     function getDirectorAssignments() {
         const assignments = {};
         const numDirectors = parseInt(document.getElementById('num-directors').value);
@@ -774,59 +787,55 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function calculateSchedule() {
+        // --- 1. SETUP & INITIALIZATION ---
         const producersCutsOverlap = document.getElementById('producers-cuts-overlap').checked;
         const producersCutsPreWrap = document.getElementById('producers-cuts-pre-wrap').checked;
 
         masterTaskList.forEach(task => {
-            task.isScheduled = false;
-            if (!task.isManuallySet && task.originalPredecessors) {
-                task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+            if (!task.isManuallySet) {
+                task.isScheduled = false;
+                task.scheduledStartDate = undefined;
+                task.scheduledEndDate = undefined;
+                if (task.originalPredecessors) {
+                    task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                }
             }
         });
         episodesData.forEach(ep => ep.tasks = []);
 
+        // --- 2. REBUILD DYNAMIC DEPENDENCIES (as before) ---
         const directorAssignments = getDirectorAssignments();
         const shootingBlocks = getShootingBlocks();
         shootingBlocks.forEach(block => {
-            const directorName = directorAssignments[block.episodes[0]];
-            block.director = directorName;
+            block.director = directorAssignments[block.episodes[0]];
             block.episodes.forEach(epId => {
                 if(episodesData[epId]) episodesData[epId].blockWrapDate = block.endDate;
             });
         });
-        
+
         if(enforceSequentialLock){
-            const allPictureLocks = masterTaskList.filter(t => t.info.name === "Picture Lock").sort((a,b) => a.epId - b.epId);
+            const allPictureLocks = masterTaskList.filter(t => t.info.name === "Picture Lock" && !t.isManuallySet).sort((a,b) => a.epId - b.epId);
             for(let i=1; i < allPictureLocks.length; i++){
-                if (!allPictureLocks[i].isManuallySet) {
-                    allPictureLocks[i].predecessors.push({task: allPictureLocks[i-1], delay: 0});
-                }
+                allPictureLocks[i].predecessors.push({task: allPictureLocks[i-1], delay: 0});
             }
         }
         
-        const allOnlineConforms = masterTaskList.filter(t => t.info.name === "Online Conform").sort((a,b) => a.epId - b.epId);
+        const allOnlineConforms = masterTaskList.filter(t => t.info.name === "Online Conform" && !t.isManuallySet).sort((a,b) => a.epId - b.epId);
         const allFinalColorGrades = masterTaskList.filter(t => t.info.name === "Final Color Grade").sort((a,b) => a.epId - b.epId);
         for(let i=1; i < allOnlineConforms.length; i++){
-            const currentConform = allOnlineConforms[i];
-            const prevFinalColor = allFinalColorGrades[i-1];
-            if (currentConform && prevFinalColor && !currentConform.isManuallySet) {
-                currentConform.predecessors.push({task: prevFinalColor, delay: 0});
-            }
+            allOnlineConforms[i].predecessors.push({task: allFinalColorGrades[i-1], delay: 0});
         }
-
+        
         const finalWrapDate = shootingBlocks.length > 0 ? new Date(Math.max(...shootingBlocks.map(b => b.endDate.getTime()))) : new Date();
         const shootWrapAnchor = { id: 'shoot-wrap-anchor', isScheduled: true, scheduledEndDate: finalWrapDate };
-        
-        const allProducersCuts = masterTaskList.filter(t => t.info.name === "Producer's Cut").sort((a, b) => a.epId - b.epId);
+        const allProducersCuts = masterTaskList.filter(t => t.info.name === "Producer's Cut" && !t.isManuallySet).sort((a, b) => a.epId - b.epId);
         for (let i = 0; i < allProducersCuts.length; i++) {
-            if(!allProducersCuts[i].isManuallySet) {
-                if (!producersCutsPreWrap && i === 0) {
-                    allProducersCuts[i].predecessors.push({task: shootWrapAnchor, delay: 0});
-                }
-                if (i > 0) {
-                    const overlapDays = producersCutsOverlap ? Math.floor(allProducersCuts[i-1].info.duration / 2) : 0;
-                    allProducersCuts[i].predecessors.push({task: allProducersCuts[i-1], delay: -overlapDays});
-                }
+            if (!producersCutsPreWrap && i === 0) {
+                allProducersCuts[i].predecessors.push({task: shootWrapAnchor, delay: 0});
+            }
+            if (i > 0) {
+                const overlapDays = producersCutsOverlap ? Math.floor(allProducersCuts[i-1].info.duration / 2) : 0;
+                allProducersCuts[i].predecessors.push({task: allProducersCuts[i-1], delay: -overlapDays});
             }
         }
         
@@ -835,16 +844,15 @@ document.addEventListener('DOMContentLoaded', () => {
         uniqueDirectors.forEach(directorName => {
             const directorEpsInShootOrder = episodeShootOrder.filter(epId => directorAssignments[epId] === directorName);
             for (let i = 1; i < directorEpsInShootOrder.length; i++) {
-                const prevEpId = directorEpsInShootOrder[i - 1];
-                const currentEpId = directorEpsInShootOrder[i];
-                const prevDCv2 = masterTaskList.find(t => t.epId === prevEpId && t.info.name === "Director's Cut v2");
-                const currentDC = masterTaskList.find(t => t.epId === currentEpId && t.info.name === "Director's Cut");
-                if (prevDCv2 && currentDC && !currentDC.isManuallySet) {
+                const prevDCv2 = masterTaskList.find(t => t.epId === directorEpsInShootOrder[i - 1] && t.info.name === "Director's Cut v2");
+                const currentDC = masterTaskList.find(t => t.epId === directorEpsInShootOrder[i] && t.info.name === "Director's Cut" && !t.isManuallySet);
+                if (prevDCv2 && currentDC) {
                     currentDC.predecessors.push({ task: prevDCv2, delay: 0 });
                 }
             }
         });
 
+        // --- 3. SCHEDULING LOOP ---
         let personnelAvailability = {};
         const allPersonnel = new Set();
         masterTaskList.forEach(task => task.resources.forEach(r => r && allPersonnel.add(r)));
@@ -857,7 +865,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (resource) personnelAvailability[resource] = findNextBusinessDay(task.scheduledEndDate, task.info.department, task.epId, task.resources);
             });
         });
-
+        
         let scheduledCount = masterTaskList.filter(t => t.isScheduled).length;
         let safetyBreak = 0;
         while (scheduledCount < masterTaskList.length) {
@@ -866,7 +874,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 break; 
             }
             
-            let availableTasks = masterTaskList.filter(t => !t.isScheduled && t.predecessors.every(p => p.task.isScheduled));
+            const availableTasks = masterTaskList.filter(t => !t.isScheduled && t.predecessors.every(p => p.task.isScheduled));
             if (availableTasks.length === 0) {
                 if(masterTaskList.some(t => !t.isScheduled)) console.error("Scheduling failed. Circular dependency likely.", masterTaskList.filter(t=>!t.isScheduled));
                 break;
@@ -874,12 +882,24 @@ document.addEventListener('DOMContentLoaded', () => {
             
             availableTasks.forEach(task => {
                 let dependencyStartDate = new Date('1970-01-01');
-                if (task.predecessors.length > 0) {
+
+                const findPredecessor = (name) => masterTaskList.find(p => p.epId === task.epId && p.info.name === name);
+                
+                let hardPredecessor = null;
+                if (task.info.name === "Director's Cut") hardPredecessor = findPredecessor("Editor's Cut");
+                if (task.info.name === "Producer Notes") hardPredecessor = findPredecessor("Director's Cut");
+                if (task.info.name === "Director's Cut v2") hardPredecessor = findPredecessor("Producer Notes");
+
+                if (hardPredecessor && hardPredecessor.isScheduled) {
+                    dependencyStartDate = findNextBusinessDay(hardPredecessor.scheduledEndDate, task.info.department, task.epId, task.resources);
+                }
+                
+                else if (task.manualStartDate) {
+                    dependencyStartDate = task.manualStartDate;
+                } else if (task.predecessors.length > 0) {
                     const endDates = task.predecessors.map(p => {
                         const predEndDate = new Date(p.task.scheduledEndDate.getTime());
-                        if (p.delay < 0) {
-                            return subtractBusinessDays(predEndDate, -p.delay, task.info.department, task.epId, task.resources);
-                        }
+                        if (p.delay < 0) return subtractBusinessDays(predEndDate, -p.delay, task.info.department, task.epId, task.resources);
                         return p.delay > 0 ? addBusinessDays(predEndDate, p.delay, task.info.department, task.epId, task.resources) : predEndDate;
                     });
                     dependencyStartDate = findNextBusinessDay(new Date(Math.max(...endDates.map(d => d.getTime()))), task.info.department, task.epId, task.resources);
@@ -889,38 +909,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 let resourceStartDate = new Date('1970-01-01');
                 if (task.resources.length > 0) {
-                    const resourceAvailDates = task.resources.filter(r => r).map(resourceName => {
-                        let availableFrom = personnelAvailability[resourceName] ? new Date(personnelAvailability[resourceName].getTime()) : new Date('1970-01-01');
-                        const directorShootBlocks = shootingBlocks.filter(b => b.director === resourceName);
-                        if (directorShootBlocks.length > 0) {
-                            let isBlocked = true;
-                            while (isBlocked) {
-                                isBlocked = false;
-                                for (const block of directorShootBlocks) {
-                                    const taskEndDate = addBusinessDays(availableFrom, task.info.duration, task.info.department, task.epId, task.resources);
-                                    if (Math.max(availableFrom.getTime(), block.startDate.getTime()) < Math.min(taskEndDate.getTime(), block.endDate.getTime())) {
-                                        availableFrom = findNextBusinessDay(block.endDate, task.info.department, task.epId, task.resources);
-                                        isBlocked = true; break; 
-                                    }
-                                }
-                            }
-                        }
-                        return availableFrom.getTime();
-                    });
-                    if(resourceAvailDates.length > 0) {
-                        resourceStartDate = new Date(Math.max(...resourceAvailDates));
-                    }
+                    const resourceAvailDates = task.resources.filter(r => r).map(rName => personnelAvailability[rName] || new Date('1970-01-01'));
+                    resourceStartDate = new Date(Math.max(...resourceAvailDates.map(d => d.getTime())));
                 }
                 
-                let baseStart = Math.max(dependencyStartDate.getTime(), resourceStartDate.getTime());
-                if (task.manualStartDate instanceof Date && !isNaN(task.manualStartDate.getTime())) {
-                    baseStart = Math.max(baseStart, task.manualStartDate.getTime());
-                }
-                task.potentialStartDate = new Date(baseStart);
+                task.potentialStartDate = new Date(Math.max(dependencyStartDate.getTime(), resourceStartDate.getTime()));
             });
             
             availableTasks.sort((a, b) => a.potentialStartDate - b.potentialStartDate || a.info.priority - b.info.priority || a.epId - b.epId);
-
             const taskToSchedule = availableTasks[0];
             if (!taskToSchedule) break;
 
@@ -934,14 +930,12 @@ document.addEventListener('DOMContentLoaded', () => {
             taskToSchedule.isScheduled = true;
             scheduledCount++;
 
-            if (taskToSchedule.manualStartDate) {
-                delete taskToSchedule.manualStartDate;
-            }
-
             taskToSchedule.resources.forEach(resource => {
                 if (resource) personnelAvailability[resource] = findNextBusinessDay(taskToSchedule.scheduledEndDate, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources);
             });
         }
+
+        // --- 4. FINALIZATION ---
         masterTaskList.forEach(task => { if(task.isScheduled) episodesData[task.epId].tasks.push(task); });
         calculateReleaseDates();
     }
@@ -1116,11 +1110,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const shootingBlocks = getShootingBlocks();
         const wrapOfPhotography = shootingBlocks.length > 0 ? shootingBlocks[shootingBlocks.length-1].endDate : null;
 
-        // --- FIX: Logic to start Post Week 1 immediately after the final shoot week ---
         let finalShootWeekStartDate = null;
         if (wrapOfPhotography) {
             finalShootWeekStartDate = new Date(wrapOfPhotography.getTime());
-            // Find the Sunday that starts the week of the wrap date
             finalShootWeekStartDate.setUTCDate(finalShootWeekStartDate.getUTCDate() - finalShootWeekStartDate.getUTCDay());
         }
 
@@ -1332,7 +1324,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- NEW HELPER FUNCTIONS for Grid Columns ---
     function getMaxStudioCuts() {
         let maxCuts = 0;
         if (!episodesData || episodesData.length === 0) return 0;
@@ -1361,7 +1352,6 @@ document.addEventListener('DOMContentLoaded', () => {
         table.innerHTML = '';
         if (episodesData.length === 0) return;
         
-        // If columns haven't been configured yet (e.g., first run), set them to all available.
         if (!gridVisibleColumns) {
             gridVisibleColumns = getCurrentAllGridColumns();
         }
@@ -1643,7 +1633,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const epNumber = parseInt(parts[0].trim(), 10);
                     const days = parseInt(parts[1].trim(), 10);
                     if (!isNaN(epNumber) && !isNaN(days) && epNumber > 0) {
-                        overrides[epNumber - 1] = days; // Store as 0-indexed episode ID
+                        overrides[epNumber - 1] = days;
                     }
                 }
             });
@@ -1698,7 +1688,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return shootingBlocks;
     }
     
-    // --- UI INTERACTION (Event Delegation for Expand/Collapse) ---
     function setupAllEventListeners() {
         const ganttContainer = document.getElementById('gantt-container');
         const waterfallContainer = document.getElementById('waterfall-container');
@@ -1761,7 +1750,129 @@ document.addEventListener('DOMContentLoaded', () => {
         addManualDragListeners();
         addWaterfallDragListeners();
     }
-    
+
+    function saveSchedule() {
+        const cleanEpisodesData = episodesData.map(ep => ({
+            editors: ep.editors,
+            director: ep.director,
+            blockWrapDate: ep.blockWrapDate
+        }));
+        
+        const state = {
+            inputs: {},
+            tasks: masterTaskList,
+            episodes: cleanEpisodesData,
+            hiatuses: hiatuses,
+            sixthDayWorkDates: sixthDayWorkDates,
+            budget: budgetData,
+            gridVisibleColumns: gridVisibleColumns
+        };
+        
+        document.querySelectorAll('.controls input, .controls select, .schedule-variables input, .personnel-assignments input, .personnel-assignments select, .block-assignments input, .holiday-settings input, .holiday-settings select, #budget-view input, #budget-view select').forEach(el => {
+            if (el.type === 'checkbox') {
+                state.inputs[el.id] = el.checked;
+            } else if(el.type === 'select-multiple') {
+                state.inputs[el.id] = Array.from(el.selectedOptions).map(opt => opt.value);
+            }
+            else {
+                state.inputs[el.id] = el.value;
+            }
+        });
+
+        const dataStr = JSON.stringify(state, (key, value) => {
+            if (key === 'predecessors' || key === 'originalPredecessors') {
+                 if (!value) return [];
+                 return value.filter(p => p && p.task).map(p => ({...p, task: p.task.id}));
+            }
+            return value;
+        }, 2);
+
+        const blob = new Blob([dataStr], {type: "application/json"});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${generateExportFilename()}.json`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+    function loadSchedule() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.readAsText(file, 'UTF-8');
+            reader.onload = readerEvent => {
+                try {
+                    const content = readerEvent.target.result;
+                    const state = JSON.parse(content);
+
+                    hiatuses = state.hiatuses || [];
+                    sixthDayWorkDates = state.sixthDayWorkDates || [];
+                    budgetData = state.budget || {};
+
+                    for (const id in state.inputs) {
+                        const el = document.getElementById(id);
+                        if (el) {
+                             if (el.type === 'checkbox') el.checked = state.inputs[id];
+                             else if (el.type !== 'select-multiple') el.value = state.inputs[id];
+                        }
+                    }
+
+                    generatePersonnelFields();
+                    generateStudioCutFields();
+                    generateBlockFields();
+                    generateHolidaySelectors();
+                    
+                     for (const id in state.inputs) {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            if (el.type === 'select-multiple') {
+                                const values = state.inputs[id];
+                                Array.from(el.options).forEach(opt => {
+                                    opt.selected = values.includes(opt.value);
+                                });
+                            } else if(el.closest('.holiday-region-group')) {
+                                el.checked = state.inputs[id];
+                            }
+                        }
+                    }
+
+                    if (state.tasks) {
+                        state.tasks.forEach(task => {
+                            if (task.scheduledStartDate) task.scheduledStartDate = new Date(task.scheduledStartDate);
+                            if (task.scheduledEndDate) task.scheduledEndDate = new Date(task.scheduledEndDate);
+                            if (task.potentialStartDate) task.potentialStartDate = new Date(task.potentialStartDate);
+                        });
+                        masterTaskList = state.tasks;
+                        const taskMap = new Map(masterTaskList.map(t => [t.id, t]));
+
+                        masterTaskList.forEach(task => {
+                            if(task.predecessors) {
+                                task.predecessors = task.predecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
+                            }
+                             if(task.originalPredecessors) {
+                                task.originalPredecessors = task.originalPredecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
+                            }
+                        });
+                    }
+                    
+                    gridVisibleColumns = state.gridVisibleColumns || getCurrentAllGridColumns();
+
+                    updateWrapDate();
+                    renderHiatusList();
+                    renderSixthDayList();
+                    calculateAndRender();
+
+                } catch(err) {
+                    alert("Error loading file. It may be invalid or corrupted.");
+                    console.error("Load schedule error:", err);
+                }
+            }
+        }
+        input.click();
+    }
     function addManualDragListeners() {
         let draggedState = null;
         let ghostElement = null;
@@ -1820,23 +1931,33 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             draggedState.element.classList.remove('dragging');
             document.removeEventListener('mousemove', onMouseMove);
-            
+
             if (currentDropTarget && currentDropTarget.dataset.dateIso) {
                 const newStartDate = new Date(currentDropTarget.dataset.dateIso);
                 const task = draggedState.taskObject;
 
                 if (unlinkToggle.checked) {
+                    task.isManuallySet = false;
                     task.manualStartDate = newStartDate;
-                    task.isManuallySet = false; 
-                    calculateAndRender();
+
+                    const successors = masterTaskList.filter(t => (t.originalPredecessors || []).some(p => p.task.id === task.id));
+                    const unlinkedSuccessor = successors.find(s => s.isManuallySet);
+
+                    if (unlinkedSuccessor) {
+                        unlinkedSuccessor.isManuallySet = false;
+                        unlinkedSuccessor.manualStartDate = undefined;
+                        unlinkedSuccessor.scheduledStartDate = undefined;
+                    }
                 } else {
                     task.isManuallySet = true;
-                    task.predecessors = []; 
-                    task.scheduledStartDate = newStartDate; 
-                    task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
-                    renderAllViews();
+                    task.predecessors = [];
+                    task.manualStartDate = undefined;
+                    task.scheduledStartDate = newStartDate;
                 }
+
+                calculateAndRender();
             }
+
             draggedState = null;
             ghostElement = null;
         };
@@ -1897,7 +2018,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('export-calendar').addEventListener('click', exportToICS);
     }
     
-    // --- EXPORT FUNCTIONS ---
     function getFormattedTimestamp() {
         const now = new Date();
         const month = (now.getMonth() + 1).toString().padStart(2, '0');
@@ -2126,7 +2246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         
         doc.setFontSize(8);
-        doc.setTextColor(128, 128, 128); // Set color to grey
+        doc.setTextColor(128, 128, 128);
         doc.text(AppDr_g0n, 40, doc.lastAutoTable.finalY + 20);
 
         const filename = `${generateExportFilename()}_GRID`;
@@ -2245,7 +2365,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.querySelectorAll('.budget-category-table').forEach(table => {
             const categoryName = table.querySelector('h2').textContent;
-            aoa.push([categoryName]); // Category Header
+            aoa.push([categoryName]);
 
             table.querySelectorAll('tbody tr').forEach(row => {
                 const id = row.dataset.id;
@@ -2272,7 +2392,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const subtotal = parseFloat(table.querySelector('.subtotal')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
             aoa.push(['', '', '', '', '', '', '', '', '', '', '', '', 'Subtotal', subtotal]);
-            aoa.push([]); // Spacer
+            aoa.push([]);
         });
         
         const grandTotal = parseFloat(document.getElementById('grand-total')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
@@ -2287,13 +2407,11 @@ document.addEventListener('DOMContentLoaded', () => {
         XLSX.writeFile(wb, `${filename}.xlsx`);
     }
 
-    // --- INITIALIZATION & MODALS ---
-    
     function addFreeTask(epId, department, startDate, name, duration, assignee) {
         if (!name || !name.trim()) return; 
 
         const newTask = {
-            id: `ep${epId}-freetask-${crypto.randomUUID()}`,
+            id: `ep${epId}-freetask-${generateUUID()}`,
             epId: parseInt(epId),
             info: { 
                 name: name.trim(), 
@@ -2579,18 +2697,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentDropTarget && currentDropTarget.dataset.dateIso) {
                 const newStartDate = new Date(currentDropTarget.dataset.dateIso);
                 const task = draggedState.taskObject;
-
+                
                 if (unlinkToggle.checked) {
+                    task.isManuallySet = false;
                     task.manualStartDate = newStartDate;
-                    task.isManuallySet = false; 
-                    calculateAndRender();
+
+                    const successors = masterTaskList.filter(t => (t.originalPredecessors || []).some(p => p.task.id === task.id));
+                    const unlinkedSuccessor = successors.find(s => s.isManuallySet);
+
+                    if (unlinkedSuccessor) {
+                        unlinkedSuccessor.isManuallySet = false;
+                        unlinkedSuccessor.manualStartDate = undefined;
+                        unlinkedSuccessor.scheduledStartDate = undefined;
+                    }
                 } else {
                     task.isManuallySet = true;
-                    task.predecessors = []; 
+                    task.predecessors = [];
+                    task.manualStartDate = undefined;
                     task.scheduledStartDate = newStartDate;
-                    task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
-                    renderAllViews();
                 }
+
+                calculateAndRender();
             }
             
             draggedState = null;
@@ -2601,12 +2728,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
     }
 
-    // --- HIATUS & 6TH DAY WORK FUNCTIONS ---
     function initializeDefaultHiatus() {
         const sopValue = document.getElementById('start-of-photography').value;
         const year = sopValue ? new Date(sopValue).getFullYear() : new Date().getFullYear();
         hiatuses = [{
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             name: 'Holiday Hiatus',
             start: `${year}-12-22`,
             end: `${year + 1}-01-04`,
@@ -2683,7 +2809,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const id = editIdInput.value;
             const newHiatus = {
-                id: id || crypto.randomUUID(),
+                id: id || generateUUID(),
                 name: document.getElementById('hiatus-name').value,
                 start: document.getElementById('hiatus-start-date').value,
                 end: document.getElementById('hiatus-end-date').value,
@@ -2811,7 +2937,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            const newAuth = { id: crypto.randomUUID(), date, scope, value };
+            const newAuth = { id: generateUUID(), date, scope, value };
             sixthDayWorkDates.push(newAuth);
             renderSixthDayList();
             calculateAndRender();
@@ -2837,7 +2963,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const checkboxContainer = document.getElementById('grid-column-checkboxes');
 
         openBtn.addEventListener('click', () => {
-            checkboxContainer.innerHTML = ''; // Clear previous
+            checkboxContainer.innerHTML = '';
             const currentCols = getCurrentAllGridColumns();
             currentCols.forEach(colName => {
                 const isChecked = gridVisibleColumns.includes(colName);
@@ -2870,138 +2996,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 newVisibleColumns.push(checkbox.value);
             });
             gridVisibleColumns = newVisibleColumns;
-            renderGridView(); // Re-render the grid with new columns
+            renderGridView();
             closeModal();
         });
     }
-    
     // --- SAVE/LOAD FUNCTIONALITY ---
-    document.getElementById('save-schedule-btn').addEventListener('click', () => {
-        const cleanEpisodesData = episodesData.map(ep => ({
-            editors: ep.editors,
-            director: ep.director,
-            blockWrapDate: ep.blockWrapDate
-        }));
-        
-        const state = {
-            inputs: {},
-            tasks: masterTaskList,
-            episodes: cleanEpisodesData,
-            hiatuses: hiatuses,
-            sixthDayWorkDates: sixthDayWorkDates,
-            budget: budgetData,
-            gridVisibleColumns: gridVisibleColumns
-        };
-        
-        document.querySelectorAll('.controls input, .controls select, .schedule-variables input, .personnel-assignments input, .personnel-assignments select, .block-assignments input, .holiday-settings input, .holiday-settings select, #budget-view input, #budget-view select').forEach(el => {
-            if (el.type === 'checkbox') {
-                state.inputs[el.id] = el.checked;
-            } else if(el.type === 'select-multiple') {
-                state.inputs[el.id] = Array.from(el.selectedOptions).map(opt => opt.value);
-            }
-            else {
-                state.inputs[el.id] = el.value;
-            }
-        });
-
-        const dataStr = JSON.stringify(state, (key, value) => {
-            if (key === 'predecessors' || key === 'originalPredecessors') {
-                 if (!value) return [];
-                 return value.filter(p => p && p.task).map(p => ({...p, task: p.task.id}));
-            }
-            return value;
-        }, 2);
-
-        const blob = new Blob([dataStr], {type: "application/json"});
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${generateExportFilename()}.json`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-    });
-
-    document.getElementById('load-schedule-btn').addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.onchange = e => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.readAsText(file, 'UTF-8');
-            reader.onload = readerEvent => {
-                try {
-                    const content = readerEvent.target.result;
-                    const state = JSON.parse(content);
-
-                    hiatuses = state.hiatuses || [];
-                    sixthDayWorkDates = state.sixthDayWorkDates || [];
-                    budgetData = state.budget || {};
-
-                    for (const id in state.inputs) {
-                        const el = document.getElementById(id);
-                        if (el) {
-                             if (el.type === 'checkbox') el.checked = state.inputs[id];
-                             else if (el.type !== 'select-multiple') el.value = state.inputs[id];
-                        }
-                    }
-
-                    generatePersonnelFields();
-                    generateStudioCutFields();
-                    generateBlockFields();
-                    generateHolidaySelectors();
-                    
-                     for (const id in state.inputs) {
-                        const el = document.getElementById(id);
-                        if (el) {
-                            if (el.type === 'select-multiple') {
-                                const values = state.inputs[id];
-                                Array.from(el.options).forEach(opt => {
-                                    opt.selected = values.includes(opt.value);
-                                });
-                            } else if(el.closest('.holiday-region-group')) {
-                                el.checked = state.inputs[id];
-                            }
-                        }
-                    }
-
-                    if (state.tasks) {
-                        state.tasks.forEach(task => {
-                            if (task.scheduledStartDate) task.scheduledStartDate = new Date(task.scheduledStartDate);
-                            if (task.scheduledEndDate) task.scheduledEndDate = new Date(task.scheduledEndDate);
-                            if (task.potentialStartDate) task.potentialStartDate = new Date(task.potentialStartDate);
-                        });
-                        masterTaskList = state.tasks;
-                        const taskMap = new Map(masterTaskList.map(t => [t.id, t]));
-
-                        masterTaskList.forEach(task => {
-                            if(task.predecessors) {
-                                task.predecessors = task.predecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
-                            }
-                             if(task.originalPredecessors) {
-                                task.originalPredecessors = task.originalPredecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
-                            }
-                        });
-                    }
-                    
-                    // Load column visibility, or set to default if not present
-                    gridVisibleColumns = state.gridVisibleColumns || getCurrentAllGridColumns();
-
-                    updateWrapDate();
-                    renderHiatusList();
-                    renderSixthDayList();
-                    calculateAndRender();
-
-                } catch(err) {
-                    alert("Error loading file. It may be invalid or corrupted.");
-                    console.error("Load schedule error:", err);
-                }
-            }
-        }
-        input.click();
-    });
+    document.getElementById('save-schedule-btn').addEventListener('click', saveSchedule);
+    document.getElementById('load-schedule-btn').addEventListener('click', loadSchedule);
     
-    // --- BUDGET FUNCTIONS ---
     function updateBudgetFromSchedule() {
         if (!budgetData || Object.keys(budgetData).length === 0) return;
 
@@ -3201,16 +3203,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (newEditorCount > currentEditorCount) {
             for (let i = currentEditorCount + 1; i <= newEditorCount; i++) {
-                const newEditor = { id: crypto.randomUUID(), desc: `Editor ${i}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 };
-                const newAsstEditor = { id: crypto.randomUUID(), desc: `Assistant Editor ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 };
+                const newEditor = { id: generateUUID(), desc: `Editor ${i}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 };
+                const newAsstEditor = { id: generateUUID(), desc: `Assistant Editor ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 };
                 
                 budgetData.Editorial.push(newEditor, newAsstEditor);
-                budgetData.Rooms.push({ id: crypto.randomUUID(), desc: `Editor Bay ${i}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-                budgetData.Rooms.push({ id: crypto.randomUUID(), desc: `Assistant Editor Bay ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Equipment Rentals'].push({ id: crypto.randomUUID(), desc: `AVID Rental (Editor ${i})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Equipment Rentals'].push({ id: crypto.randomUUID(), desc: `AVID Rental (Assistant Editor ${i})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Box Rentals'].push({ id: crypto.randomUUID(), desc: `Box Rental (Editor ${i})`, num: newEditor.num, prep: newEditor.prep, shoot: newEditor.shoot, post: newEditor.post, wrap: newEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
-                budgetData['Box Rentals'].push({ id: crypto.randomUUID(), desc: `Box Rental (Assistant Editor ${i})`, num: newAsstEditor.num, prep: newAsstEditor.prep, shoot: newAsstEditor.shoot, post: newAsstEditor.post, wrap: newAsstEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
+                budgetData.Rooms.push({ id: generateUUID(), desc: `Editor Bay ${i}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+                budgetData.Rooms.push({ id: generateUUID(), desc: `Assistant Editor Bay ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Equipment Rentals'].push({ id: generateUUID(), desc: `AVID Rental (Editor ${i})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Equipment Rentals'].push({ id: generateUUID(), desc: `AVID Rental (Assistant Editor ${i})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Box Rentals'].push({ id: generateUUID(), desc: `Box Rental (Editor ${i})`, num: newEditor.num, prep: newEditor.prep, shoot: newEditor.shoot, post: newEditor.post, wrap: newEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
+                budgetData['Box Rentals'].push({ id: generateUUID(), desc: `Box Rental (Assistant Editor ${i})`, num: newAsstEditor.num, prep: newAsstEditor.prep, shoot: newAsstEditor.shoot, post: newAsstEditor.post, wrap: newAsstEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
             }
         }
 
@@ -3396,7 +3398,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', (e) => {
                 const category = e.target.dataset.category;
                 budgetData[category].push({
-                    id: crypto.randomUUID(), desc: 'New Item', num: 1, prep: 0, shoot: 0, post: 0, wrap: 0, rate: 0, fringeType: 'percent', fringeRate: 25
+                    id: generateUUID(), desc: 'New Item', num: 1, prep: 0, shoot: 0, post: 0, wrap: 0, rate: 0, fringeType: 'percent', fringeRate: 25
                 });
                 renderBudgetView();
             });
@@ -3411,8 +3413,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-
-    // --- INITIALIZATION ---
     function initializeApp() {
         setupCollapsibleSections();
         generateHolidaySelectors();
