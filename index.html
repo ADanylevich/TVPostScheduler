@@ -8,6 +8,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" type="image/jpeg" href="/Post Scheduler Favicon v2.jpg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -328,7 +329,36 @@
             </div>
         </div>
     </div>
-
+<div id="conflict-resolution-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content conflict-modal-content">
+        <div class="modal-header">
+            <h2>Review Manual Position Changes</h2>
+            <button id="conflict-modal-close-btn" class="modal-close-button">&times;</button>
+        </div>
+        <div class="modal-body conflict-modal-body">
+            <p class="conflict-description">Your global changes may affect some manually positioned tasks. Please review each one below:</p>
+            
+            <div id="conflict-list" class="conflict-list">
+                <!-- Dynamic content will be inserted here by JavaScript -->
+            </div>
+            
+            <div class="conflict-tip">
+                <strong>💡 Tip:</strong> 
+                <span class="conflict-indicator directly-affected">■</span> <strong>Directly affected tasks</strong> should usually be updated to maintain schedule integrity.<br>
+                <span class="conflict-indicator potentially-affected">■</span> <strong>Potentially affected tasks</strong> can often be preserved if they don't create conflicts.
+            </div>
+        </div>
+        <div class="modal-footer conflict-modal-footer">
+            <button id="conflict-cancel" class="delete-button">Cancel Changes</button>
+            <div class="right-buttons">
+                <button id="conflict-preserve-all">Keep All Manual Positions</button>
+                <button id="conflict-update-all">Update All Positions</button>
+                <button id="conflict-apply-recommended" class="primary-action">Apply Recommended</button>
+                <button id="conflict-apply-selective" class="primary-action">Apply Selected Choices</button>
+            </div>
+        </div>
+    </div>
+</div>
     <script src="script.js"></script>
 </body>
 </html>

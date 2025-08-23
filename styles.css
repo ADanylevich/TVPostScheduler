@@ -1091,3 +1091,370 @@ input:checked + .slider:before {
     font-size: 0.875rem;
     color: var(--slate-500);
 }
+
+.drop-target {
+    background-color: #dbeafe !important;
+    border: 2px dashed #3b82f6 !important;
+}
+
+.task-bar.dragging {
+    opacity: 0.5;
+}
+
+.ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: 10000;
+    opacity: 0.8;
+    background-color: #3b82f6 !important;
+    color: white !important;
+    border: 2px solid #1d4ed8;
+    border-radius: 4px;
+}
+
+.conflict-item {
+    border: 1px solid #e2e8f0;
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 8px;
+    background-color: #f8fafc;
+}
+
+.conflict-item h4 {
+    margin: 0 0 10px 0;
+    color: #1e40af;
+}
+
+.conflict-options {
+    margin-top: 10px;
+}
+
+.conflict-options label {
+    display: block;
+    margin: 8px 0;
+    cursor: pointer;
+}
+
+.conflict-options input[type="radio"] {
+    margin-right: 8px;
+}
+
+.conflict-actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.conflict-actions button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.primary-action {
+    background-color: #3b82f6;
+    color: white;
+}
+
+.primary-action:hover {
+    background-color: #2563eb;
+}
+
+.secondary-action {
+    background-color: #6b7280;
+    color: white;
+}
+
+.secondary-action:hover {
+    background-color: #4b5563;
+}
+.waterfall-day-row.drop-target {
+    background-color: #dbeafe !important;
+    border-left: 3px solid #3b82f6 !important;
+    border-right: 3px solid #3b82f6 !important;
+}
+
+.waterfall-task-bar.dragging {
+    opacity: 0.5;
+}
+
+.waterfall-task-bar {
+    cursor: grab;
+}
+
+.waterfall-task-bar:active {
+    cursor: grabbing;
+}
+/* --- Conflict Resolution Modal Styles (Add to styles.css) --- */
+
+/* Override modal width for conflict resolution */
+.conflict-modal-content {
+    max-width: 85%;
+    width: 85%;
+    max-height: 85vh;
+}
+
+.conflict-modal-body {
+    display: block; /* Override the grid layout for this modal */
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.conflict-description {
+    color: var(--slate-600);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.conflict-list {
+    margin-bottom: 1.5rem;
+}
+
+.conflict-item {
+    border: 2px solid;
+    border-radius: var(--border-radius);
+    padding: 1.25rem;
+    margin: 1rem 0;
+    background-color: white;
+    transition: all var(--transition-speed) ease;
+}
+
+.conflict-item.directly-affected {
+    border-color: var(--red-500);
+    background-color: var(--red-100);
+}
+
+.conflict-item.potentially-affected {
+    border-color: var(--amber-300);
+    background-color: #fffbeb; /* amber-50 equivalent */
+}
+
+.conflict-item:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.conflict-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.conflict-item-title {
+    margin: 0;
+    color: var(--slate-900);
+    font-size: 1.1rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.conflict-badge {
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.conflict-badge.directly-affected {
+    background-color: var(--red-500);
+}
+
+.conflict-badge.potentially-affected {
+    background-color: #f59e0b; /* amber-500 equivalent */
+}
+
+.conflict-dates-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background-color: var(--slate-50);
+    border-radius: 6px;
+    border: 1px solid var(--slate-200);
+}
+
+@media (max-width: 768px) {
+    .conflict-dates-grid {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+}
+
+.conflict-date-section {
+    text-align: center;
+}
+
+.conflict-date-section strong {
+    color: var(--slate-700);
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.current-date {
+    color: var(--sky-600);
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.suggested-date {
+    color: var(--green-700);
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.conflict-details {
+    margin-bottom: 1.25rem;
+    padding: 0.75rem;
+    background-color: var(--slate-100);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.conflict-details strong {
+    color: var(--slate-800);
+}
+
+.conflict-options {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.conflict-options label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--slate-200);
+    background-color: white;
+    transition: all var(--transition-speed);
+    font-size: 0.9rem;
+}
+
+.conflict-options label:hover {
+    background-color: var(--slate-50);
+    border-color: var(--slate-300);
+}
+
+.conflict-options label:has(input:checked) {
+    background-color: var(--sky-100);
+    border-color: var(--sky-500);
+    color: var(--sky-900);
+}
+
+.conflict-options input[type="radio"] {
+    margin-right: 0.75rem;
+    margin-top: 0;
+    accent-color: var(--sky-600);
+}
+
+.conflict-modal-footer {
+    border-top: 1px solid var(--slate-200);
+    padding-top: 1.5rem;
+    margin-top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.conflict-modal-footer .right-buttons {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.conflict-modal-footer button {
+    padding: 0.75rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Enhance existing button styles for conflict modal */
+.conflict-modal-footer button:not(.primary-action):not(.delete-button) {
+    background-color: var(--slate-200);
+    color: var(--slate-800);
+    border: 1px solid var(--slate-300);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all var(--transition-speed) ease-in-out;
+}
+
+.conflict-modal-footer button:not(.primary-action):not(.delete-button):hover {
+    background-color: var(--slate-300);
+    border-color: var(--slate-400);
+    transform: translateY(-1px);
+}
+
+.conflict-tip {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background-color: var(--sky-50);
+    border-left: 4px solid var(--sky-500);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--slate-700);
+}
+
+.conflict-indicator {
+    font-size: 1.1em;
+    margin-right: 0.25rem;
+    font-weight: bold;
+}
+
+.conflict-indicator.directly-affected {
+    color: var(--red-500);
+}
+
+.conflict-indicator.potentially-affected {
+    color: #f59e0b; /* amber-500 equivalent */
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .conflict-modal-content {
+        max-width: 95%;
+        width: 95%;
+        margin: 1rem auto;
+    }
+    
+    .conflict-modal-footer {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .conflict-modal-footer .right-buttons {
+        justify-content: stretch;
+        flex-direction: column;
+    }
+    
+    .conflict-modal-footer button {
+        width: 100%;
+        text-align: center;
+    }
+    
+    .conflict-item-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .conflict-badge {
+        align-self: flex-start;
+    }
+}

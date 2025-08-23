@@ -1,11 +1,30 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- USER PREFERENCE: Unlink on manual move toggle ---
     const unlinkToggle = document.getElementById('unlink-on-manual-move');
-    
+
+    // --- CONTEXT-INDEPENDENT UUID GENERATOR ---
+    function generateUUID() {
+        // A robust fallback that does not rely on the crypto library.
+        let
+            d = new Date().getTime(),
+            d2 = (performance && performance.now && (performance.now() * 1000)) || 0;
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            let r = Math.random() * 16;
+            if (d > 0) {
+                r = (d + r) % 16 | 0;
+                d = Math.floor(d / 16);
+            } else {
+                r = (d2 + r) % 16 | 0;
+                d2 = Math.floor(d2 / 16);
+            }
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        });
+    }
+
     // --- GLOBAL STATE & CONFIGURATION ---
     let masterTaskList = [];
     let episodesData = [];
-    let budgetData = {}; 
+    let budgetData = {};
     let overallMinDate, overallMaxDate;
     let enforceSequentialLock = true;
     let scheduleType = 'hour-long';
@@ -15,9 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let hiatuses = [];
     let sixthDayWorkDates = [];
     let gridVisibleColumns = null;
-    // Base columns for the grid view. Dynamic columns for S/N cuts are added separately.
     const allGridColumns = ['Block', 'Director', 'Editor', 'Shoot Dates', "Editor's Cut", "Director's Cut", "Producer's Cut", 'Lock', 'Color', 'Final Mix', 'QC Delivery', 'Final Delivery', 'Earliest Release'];
-
 
     const taskColors = {
         "SHOOT": "#6c757d", "Editor's Cut": "#2a9d8f", "Director's Cut": "#e9c46a", "Producer Notes": "#a8dadc",
@@ -29,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
         "Earliest Possible Release": "#457b9d"
     };
     const AppDr_g0n = atob('VFYgUG9zdCBQcm9kdWN0aW9uIFNjaGVkdWxlciBBcHAgRGVzaWduZWQgYnkgQW5kcmUgRGFueWxldmljaA==');
-    
+
     // --- CORE ACTIONS & ORCHESTRATION ---
     function debounce(func, delay) {
         return function(...args) {
@@ -46,13 +63,519 @@ document.addEventListener('DOMContentLoaded', () => {
         const customTasks = masterTaskList.filter(t => t.id.includes('freetask'));
         const manuallySetTasks = masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask'));
         
-        masterTaskList = []; 
-        masterTaskList.push(...customTasks, ...manuallySetTasks); 
+        // If there are manually set tasks, use enhanced conflict detection
+        if (manuallySetTasks.length > 0) {
+            // Store detailed information about manually set tasks including their logical relationships
+            const manualTasksData = manuallySetTasks.map(task => ({
+                id: task.id,
+                epId: task.epId,
+                taskName: task.info.name,
+                scheduledStartDate: new Date(task.scheduledStartDate),
+                scheduledEndDate: new Date(task.scheduledEndDate),
+                isManuallySet: task.isManuallySet,
+                resources: [...task.resources],
+                // Store logical predecessor relationships, not object references
+                logicalPredecessors: task.predecessors ? task.predecessors.map(p => ({
+                    epId: p.task.epId,
+                    taskName: p.task.info.name,
+                    delay: p.delay
+                })) : []
+            }));
+            
+            // Store current state for comparison
+            const previousSchedule = masterTaskList.filter(t => t.isScheduled).map(t => ({
+                id: t.id,
+                scheduledStartDate: new Date(t.scheduledStartDate),
+                scheduledEndDate: new Date(t.scheduledEndDate),
+                isManuallySet: t.isManuallySet
+            }));
+            
+            // Clear and regenerate
+            masterTaskList = [];
+            masterTaskList.push(...customTasks);
+            
+            // Generate fresh schedule
+            generateScheduleFromScratch();
+            
+            // Now restore the manually set tasks with proper relationships
+            restoreManuallySetTasks(manualTasksData);
+            
+            // Run conflict detection
+            calculateScheduleWithConflictDetection(previousSchedule, 
+                masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask')));
+        } else {
+            // No manual tasks, proceed normally
+            masterTaskList = [];
+            masterTaskList.push(...customTasks);
+            
+            generateScheduleFromScratch();
+            calculateAndRender();
+        }
+    }
+
+// New function to properly restore manually set tasks after regeneration
+function restoreManuallySetTasks(manualTasksData) {
+    manualTasksData.forEach(manualData => {
+        // Find the corresponding newly generated task
+        const newTask = masterTaskList.find(t => 
+            t.epId === manualData.epId && 
+            t.info.name === manualData.taskName
+        );
         
-        generateScheduleFromScratch();
+        if (newTask) {
+            // Restore the manual properties
+            newTask.isManuallySet = true;
+            newTask.scheduledStartDate = manualData.scheduledStartDate;
+            newTask.scheduledEndDate = manualData.scheduledEndDate;
+            newTask.isScheduled = true;
+            newTask.resources = [...manualData.resources];
+            
+            // Restore logical predecessor relationships
+            if (manualData.logicalPredecessors.length > 0) {
+                newTask.predecessors = manualData.logicalPredecessors.map(logicalPred => {
+                    const predTask = masterTaskList.find(t => 
+                        t.epId === logicalPred.epId && 
+                        t.info.name === logicalPred.taskName
+                    );
+                    return predTask ? { task: predTask, delay: logicalPred.delay } : null;
+                }).filter(p => p !== null);
+            } else {
+                // If no predecessors were stored, clear them (was manually unlinked)
+                newTask.predecessors = [];
+            }
+        }
+    });
+}
+
+// Enhanced calculateScheduleWithConflictDetection to handle restored tasks better
+function calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks) {
+    // Ensure manually set tasks maintain their scheduled state
+    manuallySetTasks.forEach(task => {
+        if (task.isManuallySet && task.scheduledStartDate) {
+            task.isScheduled = true;
+        }
+    });
+    
+    const tempSchedule = calculateIdealSchedule();
+    const conflicts = detectAdvancedConflicts(tempSchedule, manuallySetTasks);
+    
+    if (conflicts.length > 0 && !conflictResolutionMode) {
+        showConflictModal(conflicts);
+    } else {
+        calculateSchedule();
         calculateAndRender();
     }
+}
+
+// ENHANCED CONFLICT DETECTION AND RESOLUTION SYSTEM
+let conflictResolutionMode = false;
+let lastChangedInputId = null;
+
+// Global change tracking
+window.lastChangedInputId = null;
+
+function setLastChangedInput(inputId) {
+    window.lastChangedInputId = inputId;
+    lastChangedInputId = inputId;
+}
+
+// Enhanced schedule calculation with conflict detection
+function calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks) {
+    const tempSchedule = calculateIdealSchedule();
+    const conflicts = detectAdvancedConflicts(tempSchedule, manuallySetTasks);
     
+    if (conflicts.length > 0 && !conflictResolutionMode) {
+        showConflictModal(conflicts);
+    } else {
+        calculateSchedule();
+        calculateAndRender();
+    }
+}
+
+// Calculate ideal schedule without manual interventions
+function calculateIdealSchedule() {
+    const idealTaskList = masterTaskList.map(task => {
+        const idealTask = { ...task };
+        if (idealTask.isManuallySet && !idealTask.id.includes('freetask')) {
+            idealTask.isManuallySet = false;
+            idealTask.isScheduled = false;
+            if (idealTask.originalPredecessors) {
+                idealTask.predecessors = idealTask.originalPredecessors.map(p => ({ ...p }));
+            }
+        }
+        return idealTask;
+    });
+    
+    const originalList = [...masterTaskList];
+    masterTaskList = idealTaskList;
+    calculateSchedule();
+    const idealSchedule = masterTaskList.filter(t => t.isScheduled).map(t => ({
+        id: t.id,
+        idealStartDate: new Date(t.scheduledStartDate),
+        idealEndDate: new Date(t.scheduledEndDate)
+    }));
+    
+    masterTaskList = originalList;
+    return idealSchedule;
+}
+
+// Advanced conflict detection with better intelligence
+function detectAdvancedConflicts(idealSchedule, manuallySetTasks) {
+    const conflicts = [];
+    
+    manuallySetTasks.forEach(manualTask => {
+        const idealTask = idealSchedule.find(t => t.id === manualTask.id);
+        if (!idealTask) return;
+        
+        const isDirectlyAffected = isTaskDirectlyAffectedByGlobalChange(manualTask);
+        const wouldCreateConflict = checkForScheduleConflicts(manualTask, idealSchedule);
+        
+        // Calculate time difference
+        const timeDiff = Math.abs(idealTask.idealStartDate - manualTask.scheduledStartDate);
+        const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
+        
+        // Determine if this is a significant conflict
+        const isSignificantConflict = daysDiff > 1 || isDirectlyAffected || wouldCreateConflict;
+        
+        if (isSignificantConflict) {
+            conflicts.push({
+                task: manualTask,
+                idealStartDate: idealTask.idealStartDate,
+                idealEndDate: idealTask.idealEndDate,
+                currentStartDate: manualTask.scheduledStartDate,
+                currentEndDate: manualTask.scheduledEndDate,
+                daysDiff: Math.round(daysDiff),
+                isDirectlyAffected: isDirectlyAffected,
+                wouldCreateConflict: wouldCreateConflict,
+                reason: getConflictReason(manualTask, idealTask, isDirectlyAffected, wouldCreateConflict)
+            });
+        }
+    });
+    
+    return conflicts;
+}
+
+// Check if task is directly affected by global change
+function isTaskDirectlyAffectedByGlobalChange(task) {
+    const changedId = lastChangedInputId;
+    if (!changedId) return false;
+    
+    // Task duration changes
+    const durationMappings = {
+        'editors-cut-days': "Editor's Cut",
+        'directors-cut-days': ["Director's Cut", "Director's Cut v2"],
+        'producers-cut-days': "Producer's Cut",
+        'studio-notes-days': "Notes",
+        'network-cut-days': "Studio/Network Cut",
+        'picture-lock-days': "Picture Lock"
+    };
+    
+    for (const [inputId, taskNames] of Object.entries(durationMappings)) {
+        if (changedId === inputId) {
+            const names = Array.isArray(taskNames) ? taskNames : [taskNames];
+            if (names.some(name => task.info.name.startsWith(name))) {
+                return true;
+            }
+        }
+    }
+    
+    // Finishing period changes
+    if (changedId === 'finishing-period-weeks' && 
+        ['VFX Due', 'Online Conform', 'Color Grade', 'Final Mix', 'M&E Delivery'].includes(task.info.name)) {
+        return true;
+    }
+    
+    // Studio cuts per episode changes
+    if (changedId.startsWith('ep-studio-cuts-') && task.info.name.startsWith("Studio/Network Cut")) {
+        const epId = changedId.split('-')[3];
+        return task.epId === parseInt(epId);
+    }
+    
+    // Personnel assignment changes
+    if ((changedId.startsWith('editor-eps-') || changedId.startsWith('director-eps-')) && 
+        task.info.department === 'EDIT') {
+        return true;
+    }
+    
+    // Structural changes that affect everything
+    const structuralChanges = [
+        'num-episodes', 'num-editors', 'num-directors', 'num-shoot-blocks', 
+        'start-of-photography', 'shoot-days-per-ep', 'toggle-sequential-lock',
+        'producers-cuts-overlap', 'producers-cuts-pre-wrap'
+    ];
+    
+    if (structuralChanges.includes(changedId)) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Check for various types of schedule conflicts
+function checkForScheduleConflicts(manualTask, idealSchedule) {
+    // Check for resource conflicts with other scheduled tasks
+    const resourceConflicts = masterTaskList.filter(t => 
+        t.id !== manualTask.id &&
+        t.isScheduled &&
+        t.resources.some(r => manualTask.resources.includes(r)) &&
+        !(manualTask.scheduledEndDate <= t.scheduledStartDate || 
+          manualTask.scheduledStartDate >= t.scheduledEndDate)
+    );
+    
+    if (resourceConflicts.length > 0) return true;
+    
+    // Check for dependency violations
+    const dependents = masterTaskList.filter(t => 
+        t.predecessors && t.predecessors.some(p => p.task.id === manualTask.id)
+    );
+    
+    for (const dependent of dependents) {
+        if (dependent.isScheduled && dependent.scheduledStartDate < manualTask.scheduledEndDate) {
+            return true;
+        }
+    }
+    
+    // Check if manual position violates predecessor constraints
+    for (const pred of manualTask.predecessors) {
+        if (pred.task && pred.task.isScheduled && 
+            manualTask.scheduledStartDate < pred.task.scheduledEndDate) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// Get detailed conflict reason
+function getConflictReason(manualTask, idealTask, isDirectlyAffected, wouldCreateConflict) {
+    if (isDirectlyAffected) {
+        return "Task duration or dependencies changed by your global update";
+    }
+    
+    if (wouldCreateConflict) {
+        return "Manual position creates resource or dependency conflicts";
+    }
+    
+    const daysDiff = Math.abs(idealTask.idealStartDate - manualTask.scheduledStartDate) / (1000 * 60 * 60 * 24);
+    if (daysDiff > 7) {
+        return "Manual position is significantly different from optimal schedule";
+    }
+    
+    return "Manual position may need adjustment due to schedule changes";
+}
+
+// Create conflict item element for modal
+function createConflictItemElement(conflict, index) {
+    const div = document.createElement('div');
+    div.className = 'conflict-item';
+    
+    const formatDate = (date) => date.toLocaleDateString('en-US', { 
+        month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' 
+    });
+    
+    div.innerHTML = `
+        <div class="conflict-task-info">
+            <strong>EP ${conflict.task.epId + 1}: ${conflict.task.info.name}</strong>
+            <div class="conflict-dates">
+                <div class="current-date">Current: ${formatDate(conflict.currentStartDate)}</div>
+                <div class="recommended-date">Recommended: ${formatDate(conflict.idealStartDate)}</div>
+                <div class="conflict-reason">${conflict.reason}</div>
+                ${conflict.daysDiff > 0 ? `<div class="days-diff">${conflict.daysDiff} day${conflict.daysDiff !== 1 ? 's' : ''} difference</div>` : ''}
+            </div>
+        </div>
+        <div class="conflict-choice">
+            <label>
+                <input type="radio" name="conflict-${index}" value="preserve" ${!conflict.isDirectlyAffected ? 'checked' : ''}>
+                Keep Current Position
+            </label>
+            <label>
+                <input type="radio" name="conflict-${index}" value="update" ${conflict.isDirectlyAffected ? 'checked' : ''}>
+                Move to Recommended Position
+            </label>
+        </div>
+    `;
+    
+    return div;
+}
+
+// Show conflict modal with enhanced UI
+function showConflictModal(conflicts) {
+    const modal = document.getElementById('conflict-resolution-modal');
+    const conflictList = document.getElementById('conflict-list');
+    
+    // Clear existing content
+    conflictList.innerHTML = '';
+    
+    // Create conflict items
+    conflicts.forEach((conflict, index) => {
+        const conflictItem = createConflictItemElement(conflict, index);
+        conflictList.appendChild(conflictItem);
+    });
+    
+    // Setup event listeners
+    setupConflictModalEventListeners(modal, conflicts);
+    
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+// Setup modal event listeners with improved logic
+function setupConflictModalEventListeners(modal, conflicts) {
+    // Remove any existing listeners
+    const existingModal = document.querySelector('#conflict-resolution-modal[data-listeners="true"]');
+    if (existingModal) {
+        existingModal.removeAttribute('data-listeners');
+    }
+    
+    modal.setAttribute('data-listeners', 'true');
+    
+    // Close button
+    document.getElementById('conflict-modal-close-btn').onclick = () => {
+        closeConflictModal();
+    };
+    
+    // Apply recommended (smart default based on whether tasks are directly affected)
+    document.getElementById('conflict-apply-recommended').onclick = () => {
+        const choices = {};
+        conflicts.forEach((conflict, index) => {
+            choices[conflict.task.id] = conflict.isDirectlyAffected ? 'update' : 'preserve';
+        });
+        applyConflictResolution(conflicts, 'selective', choices);
+        closeConflictModal();
+    };
+    
+    // Preserve all manual positions
+    document.getElementById('conflict-preserve-all').onclick = () => {
+        applyConflictResolution(conflicts, 'preserve-all');
+        closeConflictModal();
+    };
+    
+    // Update all to recommended positions
+    document.getElementById('conflict-update-all').onclick = () => {
+        applyConflictResolution(conflicts, 'update-all');
+        closeConflictModal();
+    };
+    
+    // Apply selective choices
+    document.getElementById('conflict-apply-selective').onclick = () => {
+        const choices = getSelectiveChoices(conflicts);
+        applyConflictResolution(conflicts, 'selective', choices);
+        closeConflictModal();
+    };
+    
+    // Cancel changes
+    document.getElementById('conflict-cancel').onclick = () => {
+        cancelGlobalChanges();
+        closeConflictModal();
+    };
+    
+    // Click outside to close
+    modal.onclick = (e) => {
+        if (e.target === modal) {
+            closeConflictModal();
+        }
+    };
+}
+
+// Get selective choices from modal form
+function getSelectiveChoices(conflicts) {
+    const choices = {};
+    conflicts.forEach((conflict, index) => {
+        const selected = document.querySelector(`input[name="conflict-${index}"]:checked`);
+        choices[conflict.task.id] = selected ? selected.value : 'preserve';
+    });
+    return choices;
+}
+
+// Apply conflict resolution with improved logic
+function applyConflictResolution(conflicts, mode, choices = {}) {
+    conflictResolutionMode = true;
+    
+    conflicts.forEach(conflict => {
+        const task = masterTaskList.find(t => t.id === conflict.task.id);
+        if (!task) return;
+        
+        let action = mode;
+        if (mode === 'selective') {
+            action = choices[task.id] || 'preserve';
+        } else if (mode === 'preserve-all') {
+            action = 'preserve';
+        } else if (mode === 'update-all') {
+            action = 'update';
+        }
+        
+        switch (action) {
+            case 'preserve':
+                // Keep the manual position
+                task.isManuallySet = true;
+                break;
+                
+            case 'update':
+                // Move to recommended position
+                task.isManuallySet = false;
+                task.isScheduled = false;
+                // Restore original dependencies
+                if (task.originalPredecessors) {
+                    task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                }
+                break;
+        }
+    });
+    
+    calculateSchedule();
+    calculateAndRender();
+    conflictResolutionMode = false;
+}
+
+// Close conflict modal
+function closeConflictModal() {
+    const modal = document.getElementById('conflict-resolution-modal');
+    modal.style.display = 'none';
+}
+
+// Cancel global changes and revert
+function cancelGlobalChanges() {
+    conflictResolutionMode = false;
+    // Simply recalculate with current state
+    calculateSchedule();
+    calculateAndRender();
+}
+
+// Check for immediate conflicts when manually moving tasks
+function checkImmediateConflicts(task) {
+    const conflicts = [];
+    
+    // Check resource conflicts
+    const resourceConflicts = masterTaskList.filter(t => 
+        t.id !== task.id &&
+        t.isScheduled &&
+        t.isManuallySet &&
+        t.resources.some(r => task.resources.includes(r)) &&
+        !(task.scheduledEndDate <= t.scheduledStartDate || 
+          task.scheduledStartDate >= t.scheduledEndDate)
+    );
+    
+    conflicts.push(...resourceConflicts);
+    
+    return conflicts;
+}
+
+// Enhanced validation function for manual anchors
+function validateManualAnchors(manuallySetTasks) {
+    manuallySetTasks.forEach(task => {
+        if (task.isManuallySet && task.scheduledStartDate && task.scheduledEndDate) {
+            // Ensure manually set tasks keep their dates and scheduled state
+            task.isScheduled = true;
+            
+            // Validate that the end date is correct based on duration
+            const expectedEndDate = addBusinessDays(task.scheduledStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+            if (Math.abs(task.scheduledEndDate.getTime() - expectedEndDate.getTime()) > 24 * 60 * 60 * 1000) {
+                // If end date is off by more than a day, recalculate it
+                task.scheduledEndDate = expectedEndDate;
+            }
+        }
+    });
+}
     function renderAllViews() {
         renderGanttChart();
         renderWaterfallChart();
@@ -68,14 +591,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- EVENT LISTENERS ---
-    document.getElementById('toggle-sequential-lock').addEventListener('change', () => {
-        enforceSequentialLock = document.getElementById('toggle-sequential-lock').checked;
-        calculateAndRender();
-    });
-    
-    document.getElementById('producers-cuts-overlap').addEventListener('change', calculateAndRender);
-    document.getElementById('producers-cuts-pre-wrap').addEventListener('change', calculateAndRender);
-    
     document.getElementById('load-hour-long').addEventListener('click', () => loadDefaults('hour-long'));
     document.getElementById('load-half-hour').addEventListener('click', () => loadDefaults('half-hour'));
 
@@ -103,52 +618,52 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('picture-lock-days').value = 1;
             document.getElementById('finishing-period-weeks').value = 6;
         }
-        
-        generateStudioCutFields(); // Call this here to set default values correctly
-        
+
+        generateStudioCutFields();
+
         const staffItems = [
-            { id: crypto.randomUUID(), desc: 'Post Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 1800, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'Post PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 1800, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'Post PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
         ];
 
         const editorialItems = [];
         for (let i = 0; i < numEditors; i++) {
-            editorialItems.push({ id: crypto.randomUUID(), desc: `Editor ${i+1}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 });
-            editorialItems.push({ id: crypto.randomUUID(), desc: `Assistant Editor ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 });
+            editorialItems.push({ id: generateUUID(), desc: `Editor ${i+1}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 });
+            editorialItems.push({ id: generateUUID(), desc: `Assistant Editor ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 });
         }
-        editorialItems.push({ id: crypto.randomUUID(), desc: 'VFX Editor', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 40 });
-        editorialItems.push({ id: crypto.randomUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
+        editorialItems.push({ id: generateUUID(), desc: 'VFX Editor', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 40 });
+        editorialItems.push({ id: generateUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
 
         const vfxItems = [
-            { id: crypto.randomUUID(), desc: 'VFX Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 5000, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX Wrangler', num: 1, prep: 0, shoot: 10, post: 0, wrap: 0, rate: 2200, fringeType: 'percent', fringeRate: 25 },
-            { id: crypto.randomUUID(), desc: 'VFX PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Supervisor', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 5000, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Coordinator', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 2500, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX Wrangler', num: 1, prep: 0, shoot: 10, post: 0, wrap: 0, rate: 2200, fringeType: 'percent', fringeRate: 25 },
+            { id: generateUUID(), desc: 'VFX PA', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 1200, fringeType: 'percent', fringeRate: 25 },
         ];
-        
+
         const roomItems = [
-            { id: crypto.randomUUID(), desc: 'Post Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'Post Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'VFX Coordinator Room', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 350, fringeType: 'flat', fringeRate: 0 },
-            { id: crypto.randomUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'Post Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'Post Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'VFX Coordinator Room', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 350, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
         ];
         for (let i = 0; i < numEditors; i++) {
-            roomItems.push({ id: crypto.randomUUID(), desc: `Editor Bay ${i+1}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-            roomItems.push({ id: crypto.randomUUID(), desc: `Assistant Editor Bay ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+            roomItems.push({ id: generateUUID(), desc: `Editor Bay ${i+1}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+            roomItems.push({ id: generateUUID(), desc: `Assistant Editor Bay ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
         }
 
         const equipmentItems = [];
          for (let i = 0; i < numEditors; i++) {
-            equipmentItems.push({ id: crypto.randomUUID(), desc: `AVID Rental (Editor ${i+1})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-            equipmentItems.push({ id: crypto.randomUUID(), desc: `AVID Rental (Assistant Editor ${i+1})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+            equipmentItems.push({ id: generateUUID(), desc: `AVID Rental (Editor ${i+1})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+            equipmentItems.push({ id: generateUUID(), desc: `AVID Rental (Assistant Editor ${i+1})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
         }
-        equipmentItems.push({ id: crypto.randomUUID(), desc: 'AVID Rental (VFX Editor)', num: 1, prep: 0, shoot: 0, post: 20, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-        equipmentItems.push({ id: crypto.randomUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
+        equipmentItems.push({ id: generateUUID(), desc: 'AVID Rental (VFX Editor)', num: 1, prep: 0, shoot: 0, post: 20, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+        equipmentItems.push({ id: generateUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
 
         budgetData = {
             "Post-Production Staff": staffItems,
@@ -158,18 +673,18 @@ document.addEventListener('DOMContentLoaded', () => {
             "Equipment Rentals": equipmentItems,
             "Box Rentals": []
         };
-        
+
         const boxRentalEligible = [...staffItems, ...editorialItems, ...vfxItems].filter(item => !item.desc.toLowerCase().includes('mx editor'));
         budgetData["Box Rentals"] = boxRentalEligible.map(item => ({
-             id: crypto.randomUUID(), 
-             desc: `Box Rental (${item.desc})`, 
-             num: item.num, 
-             prep: item.prep, 
-             shoot: item.shoot, 
-             post: item.post, 
-             wrap: item.wrap, 
-             rate: 50, 
-             fringeType: 'capped', 
+             id: generateUUID(),
+             desc: `Box Rental (${item.desc})`,
+             num: item.num,
+             prep: item.prep,
+             shoot: item.shoot,
+             post: item.post,
+             wrap: item.wrap,
+             rate: 50,
+             fringeType: 'capped',
              fringeRate: 500
         }));
 
@@ -185,50 +700,543 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         generatePersonnelFields();
-        generateBlockFields(); 
+        generateBlockFields();
         initializeDefaultHiatus();
         updateWrapDate();
         fullRegeneration();
-        // After regeneration, set the visible columns to all available columns by default.
         gridVisibleColumns = getCurrentAllGridColumns();
         renderGridView();
     }
 
+// ENHANCED EVENT LISTENER AND GLOBAL CHANGE TRACKING SYSTEM
     
-    document.querySelectorAll('.controls input:not(#unlink-on-manual-move), .controls select, .schedule-variables input, .holiday-settings input, #air-unit').forEach(input => {
-        input.addEventListener('input', (e) => {
-            const id = e.target.id;
-            if (['show-name', 'show-code', 'schedule-version', 'created-by'].includes(id)) {
-                if(id === 'show-name') autoPopulateShowCode(e.target.value);
-                return; 
+    // Define what constitutes a global change that might affect manual tasks
+    const globalChangeEvents = new Set([
+        'toggle-sequential-lock',
+        'producers-cuts-overlap', 
+        'producers-cuts-pre-wrap',
+        'start-of-photography',
+        'num-episodes',
+        'num-editors', 
+        'num-directors',
+        'num-shoot-blocks',
+        'shoot-days-per-ep',
+        'editors-cut-days',
+        'directors-cut-days',
+        'producers-cut-days',
+        'studio-notes-days',
+        'network-cut-days',
+        'picture-lock-days',
+        'finishing-period-weeks',
+        'online-days',
+        'color-grade-days',
+        'pre-mix-days',
+        'final-mix-days',
+        'mix-review-days',
+        'final-mix-fixes-days',
+        'days-to-air',
+        'air-unit'
+    ]);
+
+    // Enhanced input change handler with better global change detection
+function handleInputChange(inputElement) {
+    const id = inputElement.id;
+    setLastChangedInput(id);
+    
+    // Skip processing for metadata fields
+    if (['show-name', 'show-code', 'schedule-version', 'created-by'].includes(id)) {
+        if (id === 'show-name') {
+            autoPopulateShowCode(inputElement.value);
+        }
+        return;
+    }
+    
+    // Define which changes require full regeneration vs simple recalculation
+    const fullRegenerationTriggers = new Set([
+        'num-episodes', 'num-editors', 'num-directors', 'num-shoot-blocks'
+    ]);
+    
+    const globalRecalculationTriggers = new Set([
+        'toggle-sequential-lock', 'producers-cuts-overlap', 'producers-cuts-pre-wrap',
+        'start-of-photography', 'shoot-days-per-ep', 'editors-cut-days',
+        'directors-cut-days', 'producers-cut-days', 'studio-notes-days',
+        'network-cut-days', 'picture-lock-days', 'finishing-period-weeks',
+        'online-days', 'color-grade-days', 'pre-mix-days', 'final-mix-days',
+        'mix-review-days', 'final-mix-fixes-days', 'days-to-air', 'air-unit'
+    ]);
+    
+    const isFullRegeneration = fullRegenerationTriggers.has(id) || 
+                             id.startsWith('ep-studio-cuts-') ||
+                             id.startsWith('editor-eps-') ||
+                             id.startsWith('director-eps-');
+    
+    const isGlobalRecalculation = globalRecalculationTriggers.has(id);
+    
+    if (isFullRegeneration) {
+        // These changes require full regeneration of tasks
+        if (id === 'num-editors') {
+            updateBudgetForEditorCount();
+        }
+        generatePersonnelFields();
+        generateStudioCutFields();
+        generateBlockFields();
+        updateWrapDate();
+        fullRegeneration();
+        gridVisibleColumns = getCurrentAllGridColumns();
+        renderGridView();
+    } else if (isGlobalRecalculation) {
+        // Update global variables as needed
+        if (id === 'toggle-sequential-lock') {
+            enforceSequentialLock = inputElement.checked;
+        }
+        
+        // These changes affect scheduling logic but don't require task regeneration
+        const hasManualTasks = masterTaskList.some(t => t.isManuallySet && !t.id.includes('freetask'));
+        
+        if (hasManualTasks) {
+            // Store the current state of manual tasks
+            const manualTasksState = masterTaskList
+                .filter(t => t.isManuallySet && !t.id.includes('freetask'))
+                .map(t => ({
+                    id: t.id,
+                    scheduledStartDate: new Date(t.scheduledStartDate),
+                    scheduledEndDate: new Date(t.scheduledEndDate),
+                    isManuallySet: t.isManuallySet,
+                    predecessors: t.predecessors ? [...t.predecessors] : []
+                }));
+            
+            // Recalculate schedule
+            calculateAndRender();
+            
+            // Check if any manual tasks were affected
+            const conflicts = checkForManualTaskConflicts(manualTasksState);
+            if (conflicts.length > 0 && !conflictResolutionMode) {
+                showConflictModal(conflicts);
             }
-            if (id.startsWith('num-') || id.includes('shoot-days-per-ep') || id.includes('shoot-day-overrides') || id.includes('num-shoot-blocks') || id.startsWith('ep-studio-cuts-')) {
-                if (id === 'num-editors') {
-                    updateBudgetForEditorCount();
+        } else {
+            // No manual tasks, simple recalculation
+            calculateAndRender();
+        }
+    } else {
+        // Local change - just regenerate
+        debouncedGenerate();
+    }
+}
+
+// Helper function to check if global changes affected manual tasks
+function checkForManualTaskConflicts(originalManualTasksState) {
+    const conflicts = [];
+    
+    originalManualTasksState.forEach(originalState => {
+        const currentTask = masterTaskList.find(t => t.id === originalState.id);
+        if (!currentTask) return;
+        
+        // Calculate what the ideal position would be for this task
+        const tempTask = { ...currentTask };
+        tempTask.isManuallySet = false;
+        tempTask.isScheduled = false;
+        
+        // Get other non-manual scheduled tasks to determine ideal position
+        const otherScheduledTasks = masterTaskList.filter(t => 
+            t.isScheduled && 
+            t.id !== currentTask.id && 
+            !t.isManuallySet
+        );
+        
+        if (otherScheduledTasks.length > 0) {
+            // Simple heuristic: check if manual task is significantly displaced from similar tasks
+            const similarTasks = otherScheduledTasks.filter(t => 
+                t.info.name === currentTask.info.name && 
+                Math.abs(t.epId - currentTask.epId) <= 1
+            );
+            
+            if (similarTasks.length > 0) {
+                const avgStartTime = similarTasks.reduce((sum, t) => sum + t.scheduledStartDate.getTime(), 0) / similarTasks.length;
+                const idealStartDate = new Date(avgStartTime);
+                const timeDiff = Math.abs(currentTask.scheduledStartDate - idealStartDate);
+                const daysDiff = timeDiff / (1000 * 60 * 60 * 24);
+                
+                if (daysDiff > 2) { // Only flag significant differences
+                    conflicts.push({
+                        task: currentTask,
+                        idealStartDate: idealStartDate,
+                        idealEndDate: addBusinessDays(idealStartDate, currentTask.info.duration, currentTask.info.department, currentTask.epId, currentTask.resources),
+                        currentStartDate: currentTask.scheduledStartDate,
+                        currentEndDate: currentTask.scheduledEndDate,
+                        daysDiff: Math.round(daysDiff),
+                        isDirectlyAffected: isTaskDirectlyAffectedByGlobalChange(currentTask),
+                        wouldCreateConflict: false,
+                        reason: "Global scheduling change affects this task's optimal position"
+                    });
                 }
-                if (id.startsWith('num-')) {
-                    generatePersonnelFields();
-                    generateStudioCutFields();
-                    generateBlockFields();
-                }
-                updateWrapDate();
+            }
+        }
+    });
+    
+    return conflicts;
+}
+
+
+
+    // Handle global changes with enhanced conflict detection
+    function handleGlobalChange(inputElement) {
+        const id = inputElement.id;
+        const hasManualTasks = masterTaskList.some(t => t.isManuallySet && !t.id.includes('freetask'));
+        
+        // Check if this change requires special handling
+        const requiresRegeneration = id.startsWith('num-') || 
+                                   id.includes('shoot-days-per-ep') || 
+                                   id.includes('shoot-day-overrides') || 
+                                   id.includes('num-shoot-blocks') || 
+                                   id.startsWith('ep-studio-cuts-');
+        
+        if (requiresRegeneration) {
+            // Handle special regeneration cases
+            if (id === 'num-editors') {
+                updateBudgetForEditorCount();
+            }
+            if (id.startsWith('num-')) {
+                generatePersonnelFields();
+                generateStudioCutFields();
+                generateBlockFields();
+            }
+            updateWrapDate();
+            
+            if (hasManualTasks) {
+                fullRegenerationWithConflictDetection();
+            } else {
                 fullRegeneration();
-                // After a change that could affect the number of S/N cuts, update the default visible columns
-                gridVisibleColumns = getCurrentAllGridColumns();
-                renderGridView();
+            }
+            
+            gridVisibleColumns = getCurrentAllGridColumns();
+            renderGridView();
+        } else {
+            // Standard global change
+            if (hasManualTasks) {
+                debouncedGenerateWithConflictDetection();
             } else {
                 debouncedGenerate();
             }
-        });
-    });
+        }
+    }
+
+    // Enhanced debounced generation with conflict detection
+    const debouncedGenerateWithConflictDetection = debounce(() => {
+        fullRegenerationWithConflictDetection();
+    }, 300);
+
+    // Full regeneration with conflict detection
+    function fullRegenerationWithConflictDetection() {
+        const customTasks = masterTaskList.filter(t => t.id.includes('freetask'));
+        const manuallySetTasks = masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask'));
+        
+        if (manuallySetTasks.length > 0) {
+            // Store current state for comparison
+            const previousSchedule = masterTaskList.filter(t => t.isScheduled).map(t => ({
+                id: t.id,
+                scheduledStartDate: new Date(t.scheduledStartDate),
+                scheduledEndDate: new Date(t.scheduledEndDate),
+                isManuallySet: t.isManuallySet
+            }));
+            
+            masterTaskList = [];
+            masterTaskList.push(...customTasks, ...manuallySetTasks);
+            
+            generateScheduleFromScratch();
+            calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks);
+        } else {
+            // No manual tasks, proceed normally
+            masterTaskList = [];
+            masterTaskList.push(...customTasks, ...manuallySetTasks);
+            
+            generateScheduleFromScratch();
+            calculateAndRender();
+        }
+    }
+
+    // Enhanced schedule calculation with smart conflict detection
+    function calculateScheduleWithSmartConflictDetection(previousSchedule, manuallySetTasks) {
+        // First, calculate what the schedule would be without manual anchors
+        const tempSchedule = calculateIdealSchedule();
+        
+        // Detect conflicts using the enhanced detection logic
+        const conflicts = detectAdvancedConflicts(tempSchedule, manuallySetTasks);
+        
+        if (conflicts.length > 0 && !conflictResolutionMode) {
+            showConflictModal(conflicts);
+        } else {
+            // No conflicts detected or we're in resolution mode - proceed normally
+            calculateSchedule();
+            calculateAndRender();
+        }
+    }
+
+    // Check if a change would affect manual tasks
+    function checkIfChangeWouldAffectManualTasks(inputElement) {
+        const id = inputElement.id;
+        
+        // Always consider structural changes as affecting manual tasks
+        if (['num-episodes', 'num-editors', 'num-directors', 'num-shoot-blocks', 
+             'start-of-photography', 'toggle-sequential-lock'].includes(id)) {
+            return true;
+        }
+        
+        // Check if any manual tasks would be directly affected
+        const manualTasks = masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask'));
+        return manualTasks.some(task => isTaskDirectlyAffectedByGlobalChange(task));
+    }
+
+    // Enhanced input change detection with better user experience
+function setupEnhancedInputListeners() {
+    // Store original values to detect actual changes
+    const originalValues = new Map();
     
+    // Main input event listeners
+    document.querySelectorAll('.controls input:not(#unlink-on-manual-move), .controls select, .schedule-variables input, .holiday-settings input, #air-unit').forEach(input => {
+        // Store original value
+        originalValues.set(input.id, input.value);
+        
+        // Remove any existing listeners to prevent duplicates
+        input.removeEventListener('input', handleInputChange);
+        input.removeEventListener('change', handleInputChange);
+        
+        // Add focus listener to capture the value when editing starts
+        input.addEventListener('focus', (e) => {
+            originalValues.set(e.target.id, e.target.value);
+        });
+        
+        // Add the new enhanced listener
+        if (input.type === 'checkbox' || input.tagName === 'SELECT') {
+            input.addEventListener('change', (e) => {
+                const originalValue = originalValues.get(e.target.id);
+                const newValue = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+                
+                // Only process if the value actually changed
+                if (originalValue != newValue) { // Use != to handle string/boolean conversion
+                    originalValues.set(e.target.id, newValue);
+                    handleInputChange(e.target);
+                }
+            });
+        } else {
+            input.addEventListener('input', (e) => {
+                const originalValue = originalValues.get(e.target.id);
+                const newValue = e.target.value;
+                
+                // Only process if the value actually changed
+                if (originalValue !== newValue) {
+                    originalValues.set(e.target.id, newValue);
+                    handleInputChange(e.target);
+                }
+            });
+        }
+    });
+
+    // Personnel assignment listeners - use new handleInputChange
+    document.querySelector('.personnel-assignments').addEventListener('change', (e) => {
+        if (e.target.matches('select')) {
+            handleInputChange(e.target);
+        }
+    });
+
+    document.querySelector('.personnel-assignments').addEventListener('input', (e) => {
+        if (e.target.matches('input[type="text"]')) {
+            handleInputChange(e.target);
+        }
+    });
+
+    // Block distribution listeners - use new handleInputChange
+    document.getElementById('block-distribution-container').addEventListener('change', (e) => {
+        if (e.target.matches('input[type="number"]')) {
+            handleInputChange(e.target);
+            updateDirectorAssignmentsFromBlocks();
+        }
+    });
+
+    // Holiday controls
+    document.getElementById('holiday-region-controls').addEventListener('change', (e) => {
+        setLastChangedInput(e.target.id);
+        calculateAndRender();
+    });
+}
+
+    // Process input changes with enhanced logic
+    function processInputChange(inputElement) {
+        const id = inputElement.id;
+        
+        // Check if this is a global change that might affect manually set tasks
+        const isGlobalChange = globalChangeEvents.has(id) || 
+                             id.startsWith('num-') || 
+                             id.includes('shoot-days-per-ep') || 
+                             id.includes('shoot-day-overrides') || 
+                             id.includes('num-shoot-blocks') || 
+                             id.startsWith('ep-studio-cuts-');
+        
+        // Skip processing for metadata fields
+        if (['show-name', 'show-code', 'schedule-version', 'created-by'].includes(id)) {
+            if(id === 'show-name') autoPopulateShowCode(inputElement.value);
+            return;
+        }
+        
+        if (isGlobalChange) {
+            const hasManualTasks = masterTaskList.some(t => t.isManuallySet && !t.id.includes('freetask'));
+            
+            if (hasManualTasks) {
+                // Check if this change would actually affect any manual tasks
+                const wouldAffectManualTasks = checkIfChangeWouldAffectManualTasks(inputElement);
+                
+                if (wouldAffectManualTasks) {
+                    // Show enhanced conflict detection
+                    processGlobalChangeWithConflictDetection(inputElement);
+                } else {
+                    // Won't affect manual tasks, proceed normally but preserve them
+                    processGlobalChangePreservingManualTasks(inputElement);
+                }
+            } else {
+                // No manual tasks, proceed normally
+                processNormalGlobalChange(inputElement);
+            }
+        } else {
+            // Not a global change, use standard processing
+            debouncedGenerate();
+        }
+    }
+
+    // Process global changes that won't affect manual tasks
+    function processGlobalChangePreservingManualTasks(inputElement) {
+        // Store manual tasks to preserve them
+        const manualTasks = masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask'));
+        const manualTaskData = manualTasks.map(t => ({
+            id: t.id,
+            scheduledStartDate: new Date(t.scheduledStartDate),
+            scheduledEndDate: new Date(t.scheduledEndDate),
+            isManuallySet: t.isManuallySet,
+            predecessors: t.predecessors ? [...t.predecessors] : []
+        }));
+        
+        // Process the change normally
+        processNormalGlobalChange(inputElement);
+        
+        // Restore manual task positions after regeneration
+        setTimeout(() => {
+            manualTaskData.forEach(manualData => {
+                const task = masterTaskList.find(t => t.id === manualData.id);
+                if (task) {
+                    task.scheduledStartDate = manualData.scheduledStartDate;
+                    task.scheduledEndDate = manualData.scheduledEndDate;
+                    task.isManuallySet = manualData.isManuallySet;
+                    task.isScheduled = true;
+                }
+            });
+            calculateAndRender();
+        }, 100);
+    }
+
+    // Process global changes with conflict detection
+    function processGlobalChangeWithConflictDetection(inputElement) {
+        const id = inputElement.id;
+        
+        if (id.startsWith('num-') || id.includes('shoot-days-per-ep') || 
+            id.includes('shoot-day-overrides') || id.includes('num-shoot-blocks') || 
+            id.startsWith('ep-studio-cuts-')) {
+            if (id === 'num-editors') {
+                updateBudgetForEditorCount();
+            }
+            if (id.startsWith('num-')) {
+                generatePersonnelFields();
+                generateStudioCutFields();
+                generateBlockFields();
+            }
+            updateWrapDate();
+            fullRegenerationWithConflictDetection();
+            gridVisibleColumns = getCurrentAllGridColumns();
+            renderGridView();
+        } else {
+            debouncedGenerateWithConflictDetection();
+        }
+    }
+
+    // Add this new function to handle the link/unlink toggle changes
+    function handleLinkUnlinkToggleChange() {
+    const isLinkedMode = !unlinkToggle.checked; // unchecked means linked
+    const tasksWithManualDates = masterTaskList.filter(t => t.manualStartDate && !t.isManuallySet);
+    
+    if (isLinkedMode && tasksWithManualDates.length > 0) {
+        // Switching from unlinked to linked mode with existing unlinked tasks
+        const message = `You have ${tasksWithManualDates.length} task(s) that were moved in UNLINKED mode. 
+        
+In LINKED mode, these tasks will be converted to fully manual positions and may affect the schedule.
+
+Would you like to:
+- "Convert" - Convert them to linked manual tasks (recommended)
+- "Reset" - Reset them to automatic scheduling
+- "Cancel" - Stay in unlinked mode`;
+
+        const choice = prompt(message + "\n\nType: convert, reset, or cancel", "convert");
+        
+        if (choice === "cancel") {
+            unlinkToggle.checked = true; // Stay in unlinked mode
+            return;
+        } else if (choice === "reset") {
+            // Reset unlinked tasks to automatic scheduling
+            tasksWithManualDates.forEach(task => {
+                delete task.manualStartDate;
+                task.isManuallySet = false;
+                task.isScheduled = false;
+                // Restore original predecessors
+                if (task.originalPredecessors) {
+                    task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                }
+            });
+            calculateAndRender();
+        } else {
+            // Convert to fully manual tasks (default)
+            tasksWithManualDates.forEach(task => {
+                task.isManuallySet = true;
+                task.isScheduled = true;
+                task.scheduledStartDate = task.manualStartDate;
+                task.scheduledEndDate = addBusinessDays(task.manualStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+                task.predecessors = []; // Clear predecessors for manual tasks
+                delete task.manualStartDate; // Remove the manual date property
+            });
+            calculateAndRender();
+        }
+    }
+    
+    // If switching to unlinked mode, no special handling needed
+    // Manual tasks will keep their positions but can be rescheduled
+}
+
+    // Process normal global changes
+    function processNormalGlobalChange(inputElement) {
+        const id = inputElement.id;
+        
+        if (id.startsWith('num-') || id.includes('shoot-days-per-ep') || 
+            id.includes('shoot-day-overrides') || id.includes('num-shoot-blocks') || 
+            id.startsWith('ep-studio-cuts-')) {
+            if (id === 'num-editors') {
+                updateBudgetForEditorCount();
+            }
+            if (id.startsWith('num-')) {
+                generatePersonnelFields();
+                generateStudioCutFields();
+                generateBlockFields();
+            }
+            updateWrapDate();
+            fullRegeneration();
+            gridVisibleColumns = getCurrentAllGridColumns();
+            renderGridView();
+        } else {
+            debouncedGenerate();
+        }
+    }
+
+    // Auto-populate show code from show name
     function autoPopulateShowCode(showName) {
         const words = showName.split(' ').filter(w => w.length > 0);
         const acronym = words.map(w => w[0]).join('').toUpperCase().slice(0, 4);
         document.getElementById('show-code').value = acronym;
     }
 
-    
     document.getElementById('block-distribution-container').addEventListener('change', (e) => {
         if (e.target.matches('input[type="number"]')) {
             updateDirectorAssignmentsFromBlocks();
@@ -245,7 +1253,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const content = header.nextElementSibling;
                 const isExpanded = header.classList.toggle('expanded');
                 content.classList.toggle('collapsed');
-                
+
                 const icon = header.querySelector('.collapsible-icon');
                 if (icon) {
                     icon.textContent = isExpanded ? '−' : '+';
@@ -253,13 +1261,13 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
-    
+
     // --- UI Field Generation ---
     function generateStudioCutFields() {
         const numEpisodes = parseInt(document.getElementById('num-episodes').value);
         const container = document.getElementById('studio-cuts-per-episode-container');
-        container.innerHTML = '<h6># of Studio/Network Cuts Per EP</h6>'; 
-        
+        container.innerHTML = '<h6># of Studio/Network Cuts Per EP</h6>';
+
         const defaultValue = scheduleType === 'half-hour' ? 2 : 3;
         for (let i = 0; i < numEpisodes; i++) {
             const epDefault = scheduleType === 'hour-long' && i === 0 ? 5 : defaultValue;
@@ -269,7 +1277,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="number" id="ep-studio-cuts-${i}" value="${epDefault}" min="0">
                 </div>`;
             container.insertAdjacentHTML('beforeend', cutEntryHTML);
-            // Re-add event listener here since we are regenerating the element
             document.getElementById(`ep-studio-cuts-${i}`).addEventListener('input', (e) => {
                 fullRegeneration();
                 gridVisibleColumns = getCurrentAllGridColumns();
@@ -282,7 +1289,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const numEpisodes = parseInt(document.getElementById('num-episodes').value);
         const numBlocks = parseInt(document.getElementById('num-shoot-blocks').value);
         const numDirectors = parseInt(document.getElementById('num-directors').value);
-        
+
         for (let i = 0; i < numDirectors; i++) {
             const directorSelect = document.getElementById(`director-eps-${i}`);
             if (directorSelect) {
@@ -309,7 +1316,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let i = 0; i < numBlocks; i++) {
                 const blockEpsInput = document.getElementById(`block-eps-${i}`);
                 if (!blockEpsInput) continue;
-                
+
                 const epsInBlock = parseInt(blockEpsInput.value);
                 const directorIndex = i % numDirectors;
                 const directorSelect = document.getElementById(`director-eps-${directorIndex}`);
@@ -325,7 +1332,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
-    
+
     function generateBlockFields() {
         const numEpisodes = parseInt(document.getElementById('num-episodes').value);
         const numBlocks = parseInt(document.getElementById('num-shoot-blocks').value);
@@ -339,7 +1346,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (numBlocks > numEpisodes) {
-            document.getElementById('num-shoot-blocks').value = numEpisodes; 
+            document.getElementById('num-shoot-blocks').value = numEpisodes;
             generateBlockFields();
             return;
         }
@@ -351,14 +1358,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const baseEpsPerBlock = Math.floor(numEpisodes / numBlocks);
         let remainder = numEpisodes % numBlocks;
-        
+
         for (let i = 0; i < numBlocks; i++) {
             const epsInBlock = baseEpsPerBlock + (remainder > 0 ? 1 : 0);
             if (remainder > 0) remainder--;
 
             const directorIndex = i % numDirectors;
             const directorName = directorNames[directorIndex];
-            
+
             const blockHTML = `
                 <div class="block-entry">
                     <label for="block-eps-${i}">Block ${i+1} EPs:</label>
@@ -375,13 +1382,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const numEpisodes = parseInt(document.getElementById('num-episodes').value);
         const numEditors = parseInt(document.getElementById('num-editors').value);
         const numDirectors = parseInt(document.getElementById('num-directors').value);
-        
+
         const editorsContainer = document.getElementById('editors-assignments');
         const directorsContainer = document.getElementById('directors-assignments');
 
         editorsContainer.innerHTML = '<h6>Editors</h6>';
         directorsContainer.innerHTML = '<h6>Directors</h6>';
-        
+
         let episodeOptions = '';
         for (let i = 1; i <= numEpisodes; i++) {
             episodeOptions += `<option value="${i-1}">EP ${i}</option>`;
@@ -445,7 +1452,7 @@ document.addEventListener('DOMContentLoaded', () => {
             container.insertAdjacentHTML('beforeend', regionHTML);
         }
     }
-    
+
     // --- DATE & CALENDAR UTILITIES ---
     const toYYYYMMDD = (d) => d.toISOString().slice(0, 10);
 
@@ -461,7 +1468,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getLastDayOfMonth(dayOfWeek, month, year) {
-        const dt = new Date(Date.UTC(year, month + 1, 0)); 
+        const dt = new Date(Date.UTC(year, month + 1, 0));
         while (dt.getUTCDay() !== dayOfWeek) {
             dt.setUTCDate(dt.getUTCDate() - 1);
         }
@@ -477,7 +1484,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const holidays = { US: [], UK: [], CA: [], AUS: [] };
         for (let i = 0; i < numYears; i++) {
             const year = startYear + i;
-            
+
             holidays.US.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 0, 1))), name: "New Year's Day (US)" });
             holidays.US.push({ date: toYYYYMMDD(getNthDayOfMonth(3, 1, 0, year)), name: "MLK Day (US)" });
             holidays.US.push({ date: toYYYYMMDD(getNthDayOfMonth(3, 1, 1, year)), name: "Presidents' Day (US)" });
@@ -491,7 +1498,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dayAfterThanksgiving.setUTCDate(thanksgiving.getUTCDate() + 1);
             holidays.US.push({ date: toYYYYMMDD(dayAfterThanksgiving), name: "Thanksgiving (US)" });
             holidays.US.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 11, 25))), name: "Christmas Day (US)" });
-            
+
             const easterUK = getEaster(year);
             holidays.UK.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 0, 1))), name: "New Year's Day (UK)" });
             const goodFridayUK = new Date(easterUK); goodFridayUK.setUTCDate(easterUK.getUTCDate() - 2);
@@ -503,7 +1510,7 @@ document.addEventListener('DOMContentLoaded', () => {
             holidays.UK.push({ date: toYYYYMMDD(getLastDayOfMonth(1, 7, year)), name: "Summer Bank Holiday (UK)" });
             holidays.UK.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 11, 25))), name: "Christmas Day (UK)" });
             holidays.UK.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 11, 26))), name: "Boxing Day (UK)" });
-            
+
             const easterCA = getEaster(year);
             holidays.CA.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 0, 1))), name: "New Year's Day (CA)" });
             const goodFridayCA = new Date(easterCA); goodFridayCA.setUTCDate(easterCA.getUTCDate() - 2);
@@ -517,13 +1524,13 @@ document.addEventListener('DOMContentLoaded', () => {
             holidays.CA.push({ date: toYYYYMMDD(getNthDayOfMonth(2, 1, 9, year)), name: "Thanksgiving (CA)" });
             holidays.CA.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 11, 25))), name: "Christmas Day (CA)" });
             holidays.CA.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 11, 26))), name: "Boxing Day (CA)" });
-            
+
             const easterAUS = getEaster(year);
             holidays.AUS.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 0, 1))), name: "New Year's Day (AUS)" });
             holidays.AUS.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 0, 26))), name: "Australia Day (AUS)" });
             const goodFridayAUS = new Date(easterAUS); goodFridayAUS.setUTCDate(easterAUS.getUTCDate() - 2);
             holidays.AUS.push({ date: toYYYYMMDD(goodFridayAUS), name: "Good Friday (AUS)" });
-            const easterMondayAUS = new Date(easterAUS); easterMondayAUS.setUTCDate(easterAUS.getUTCDate() + 1);
+            const easterMondayAUS = new Date(easterAUS); easterMondayAUS.setUTCDate(easterMondayAUS.getUTCDate() + 1);
             holidays.AUS.push({ date: toYYYYMMDD(easterMondayAUS), name: "Easter Monday (AUS)" });
             holidays.AUS.push({ date: toYYYYMMDD(new Date(Date.UTC(year, 3, 25))), name: "Anzac Day (AUS)" });
             holidays.AUS.push({ date: toYYYYMMDD(getNthDayOfMonth(2, 1, 5, year)), name: "Queen's Birthday (AUS)" });
@@ -563,9 +1570,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-        
+
         if (getHolidayForDate(date, department)) return false;
-        
+
         for(const hiatus of hiatuses) {
             const start = new Date(hiatus.start + 'T12:00:00Z');
             const end = new Date(hiatus.end + 'T12:00:00Z');
@@ -576,6 +1583,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return true;
     }
+    
+    function countBusinessDays(startDate, endDate, department, epId = null, resources = []) {
+        let count = 0;
+        let currentDate = new Date(startDate.getTime());
+        while (currentDate < endDate) {
+            if (isBusinessDay(currentDate, department, epId, resources)) {
+                count++;
+            }
+            currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+        }
+        return count;
+    }
+
 
     function findNextBusinessDay(date, department, epId = null, resources = []) {
         let nextDay = new Date(date.getTime());
@@ -585,7 +1605,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return nextDay;
     }
-    
+
     function subtractBusinessDays(startDate, duration, department, epId = null, resources = []) {
         let endDate = new Date(startDate.getTime());
         let daysSubtracted = 0;
@@ -609,12 +1629,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let endDate = new Date(startDate.getTime());
-        
+
         let currentDay = new Date(startDate.getTime());
         while (!isBusinessDay(currentDay, department, epId, resources)) {
             currentDay.setUTCDate(currentDay.getUTCDate() + 1);
         }
-        
+
         let daysAdded = 0;
         endDate = currentDay;
         if (duration > 1) {
@@ -628,10 +1648,25 @@ document.addEventListener('DOMContentLoaded', () => {
         return endDate;
     }
     
+    function addBusinessDaysWithOffset(startDate, offset, department, epId = null, resources = []) {
+        let newDate = new Date(startDate.getTime());
+        let daysMoved = 0;
+        const direction = offset > 0 ? 1 : -1;
+    
+        while (daysMoved < Math.abs(offset)) {
+            newDate.setUTCDate(newDate.getUTCDate() + direction);
+            if (isBusinessDay(newDate, department, epId, resources)) {
+                daysMoved++;
+            }
+        }
+        return newDate;
+    }
+
+
     function updateWrapDate() {
         const startDateInput = document.getElementById('start-of-photography');
         const startDateValue = startDateInput.value;
-        if (!startDateValue) return; 
+        if (!startDateValue) return;
 
         const shootingBlocks = getShootingBlocks();
         if(shootingBlocks.length === 0) return;
@@ -659,7 +1694,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- TASK & SCHEDULE CALCULATION ---
     function getDirectorAssignments() {
         const assignments = {};
         const numDirectors = parseInt(document.getElementById('num-directors').value);
@@ -677,29 +1711,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return assignments;
     }
-    
+
     function generateScheduleFromScratch() {
-        episodesData = Array.from({ length: parseInt(document.getElementById('num-episodes').value) }, (v, i) => ({ 
+        episodesData = Array.from({ length: parseInt(document.getElementById('num-episodes').value) }, (v, i) => ({
             tasks: [], editors: [], director: null
         }));
 
         const directorAssignments = getDirectorAssignments();
         for(let i = 0; i < episodesData.length; i++) episodesData[i].director = directorAssignments[i];
-        
+
         const numEditors = parseInt(document.getElementById('num-editors').value);
         for (let i = 0; i < numEditors; i++) {
             const editorName = document.getElementById(`editor-name-${i}`)?.value;
             const editorSelect = document.getElementById(`editor-eps-${i}`);
             if (editorSelect) {
                 const assignedEps = Array.from(editorSelect.selectedOptions).map(opt => parseInt(opt.value));
-                assignedEps.forEach(epId => { 
+                assignedEps.forEach(epId => {
                     if(episodesData[epId]) {
-                        episodesData[epId].editors.push(editorName); 
+                        episodesData[epId].editors.push(editorName);
                     }
                 });
             }
         }
-        
+
         const editorsCutDays = parseInt(document.getElementById('editors-cut-days').value);
         const directorsCutDays = parseInt(document.getElementById('directors-cut-days').value);
         const producersCutDays = parseInt(document.getElementById('producers-cut-days').value);
@@ -730,7 +1764,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     task.resources.push(...episodesData[i].editors);
                 }
                 if (["Director's Cut", "Director's Cut v2", "Producer Notes"].includes(name)) task.resources.push(episodesData[i].director);
-                
+
                 task.originalPredecessors = predecessors.map(p => ({ task: p, delay: 0 }));
                 currentEpisodeTasks.push(task);
                 return task;
@@ -760,205 +1794,256 @@ document.addEventListener('DOMContentLoaded', () => {
             const finalColorGrade = create("Final Color Grade", 1, 'PICTURE', [colorReview], true);
             const colorGradeAnchor = create("Color Grade Anchor", 2, 'DELAY', [onlineConform], false);
             const preMix = create("Pre-Mix", preMixDays, 'SOUND', [colorGradeAnchor], true);
-            const finalMix = create("Final Mix", finalMixDays, 'SOUND', [preMix, colorReview], true); 
+            const finalMix = create("Final Mix", finalMixDays, 'SOUND', [preMix, colorReview], true);
             const mixReview = create("Mix Review", mixReviewDays, 'SOUND', [finalMix], true);
             const finalMixFix = create("Final Mix Fix", finalMixFixesDays, 'SOUND', [mixReview], true);
             const mAndE = create("M&E", 1, 'SOUND', [finalMixFix], true);
             const mAndEDelivery = create("M&E Delivery", 1, 'SOUND', [mAndE], true);
             const qcDelivery = create("Deliver to QC v1", 1, 'DELIVERY', [mAndEDelivery], true);
-            const finalDeliveryDelay = create("Final Delivery Delay", 14, 'DELAY', [qcDelivery], false); 
+            const finalDeliveryDelay = create("Final Delivery Delay", 14, 'DELAY', [qcDelivery], false);
             const finalDelivery = create("Final Delivery", 1, 'DELIVERY', [finalDeliveryDelay], true);
 
             masterTaskList.push(...currentEpisodeTasks);
         }
     }
 
-    function calculateSchedule() {
-        const producersCutsOverlap = document.getElementById('producers-cuts-overlap').checked;
-        const producersCutsPreWrap = document.getElementById('producers-cuts-pre-wrap').checked;
+    // Enhanced calculateSchedule function to better handle manually set tasks during global changes
+function calculateSchedule() {
+    const producersCutsOverlap = document.getElementById('producers-cuts-overlap').checked;
+    const producersCutsPreWrap = document.getElementById('producers-cuts-pre-wrap').checked;
 
-        masterTaskList.forEach(task => {
+    // Store manually set tasks and validate their state
+    const manuallySetTasks = masterTaskList.filter(t => t.isManuallySet);
+    const manualTaskRelationships = new Map();
+
+    manuallySetTasks.forEach(task => {
+        // Ensure manually set tasks maintain their dates and scheduled state
+        if (task.scheduledStartDate && task.scheduledEndDate) {
+            task.isScheduled = true;
+        }
+        
+        // Store which tasks depend on this manual task
+        const dependents = masterTaskList.filter(t => 
+            t.predecessors && t.predecessors.some(p => p.task && p.task.id === task.id)
+        );
+        manualTaskRelationships.set(task.id, dependents);
+    });
+
+    // Only reset non-manually set tasks
+    masterTaskList.forEach(task => {
+        if (!task.isManuallySet) {
             task.isScheduled = false;
-            if (!task.isManuallySet && task.originalPredecessors) {
+            // Restore original predecessors for non-manual tasks only
+            if (task.originalPredecessors) {
                 task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
             }
-        });
-        episodesData.forEach(ep => ep.tasks = []);
+        }
+    });
+    
+    // Clear episode tasks to rebuild
+    episodesData.forEach(ep => ep.tasks = []);
 
-        const directorAssignments = getDirectorAssignments();
-        const shootingBlocks = getShootingBlocks();
-        shootingBlocks.forEach(block => {
-            const directorName = directorAssignments[block.episodes[0]];
-            block.director = directorName;
-            block.episodes.forEach(epId => {
-                if(episodesData[epId]) episodesData[epId].blockWrapDate = block.endDate;
-            });
+    // Rest of the calculateSchedule function remains the same...
+    const directorAssignments = getDirectorAssignments();
+    const shootingBlocks = getShootingBlocks();
+    shootingBlocks.forEach(block => {
+        const directorName = directorAssignments[block.episodes[0]];
+        block.director = directorName;
+        block.episodes.forEach(epId => {
+            if(episodesData[epId]) episodesData[epId].blockWrapDate = block.endDate;
         });
-        
-        if(enforceSequentialLock){
-            const allPictureLocks = masterTaskList.filter(t => t.info.name === "Picture Lock").sort((a,b) => a.epId - b.epId);
-            for(let i=1; i < allPictureLocks.length; i++){
-                if (!allPictureLocks[i].isManuallySet) {
-                    allPictureLocks[i].predecessors.push({task: allPictureLocks[i-1], delay: 0});
-                }
+    });
+    
+    // Apply sequential lock logic only to non-manually set tasks
+    if(enforceSequentialLock){
+        const allPictureLocks = masterTaskList.filter(t => t.info.name === "Picture Lock").sort((a,b) => a.epId - b.epId);
+        for(let i=1; i < allPictureLocks.length; i++){
+            if (!allPictureLocks[i].isManuallySet) {
+                allPictureLocks[i].predecessors.push({task: allPictureLocks[i-1], delay: 0});
             }
         }
-        
-        const allOnlineConforms = masterTaskList.filter(t => t.info.name === "Online Conform").sort((a,b) => a.epId - b.epId);
-        const allFinalColorGrades = masterTaskList.filter(t => t.info.name === "Final Color Grade").sort((a,b) => a.epId - b.epId);
-        for(let i=1; i < allOnlineConforms.length; i++){
-            const currentConform = allOnlineConforms[i];
-            const prevFinalColor = allFinalColorGrades[i-1];
-            if (currentConform && prevFinalColor && !currentConform.isManuallySet) {
-                currentConform.predecessors.push({task: prevFinalColor, delay: 0});
+    }
+    
+    // Apply other scheduling logic (online conforms, producer's cuts, etc.)
+    const allOnlineConforms = masterTaskList.filter(t => t.info.name === "Online Conform").sort((a,b) => a.epId - b.epId);
+    const allFinalColorGrades = masterTaskList.filter(t => t.info.name === "Final Color Grade").sort((a,b) => a.epId - b.epId);
+    for(let i=1; i < allOnlineConforms.length; i++){
+        const currentConform = allOnlineConforms[i];
+        const prevFinalColor = allFinalColorGrades[i-1];
+        if (currentConform && prevFinalColor && !currentConform.isManuallySet) {
+            currentConform.predecessors.push({task: prevFinalColor, delay: 0});
+        }
+    }
+
+    const finalWrapDate = shootingBlocks.length > 0 ? new Date(Math.max(...shootingBlocks.map(b => b.endDate.getTime()))) : new Date();
+    const shootWrapAnchor = { id: 'shoot-wrap-anchor', isScheduled: true, scheduledEndDate: finalWrapDate };
+    
+    const allProducersCuts = masterTaskList.filter(t => t.info.name === "Producer's Cut").sort((a, b) => a.epId - b.epId);
+    for (let i = 0; i < allProducersCuts.length; i++) {
+        if(!allProducersCuts[i].isManuallySet) {
+            if (!producersCutsPreWrap && i === 0) {
+                allProducersCuts[i].predecessors.push({task: shootWrapAnchor, delay: 0});
+            }
+            if (i > 0) {
+                const overlapDays = producersCutsOverlap ? Math.floor(allProducersCuts[i-1].info.duration / 2) : 0;
+                allProducersCuts[i].predecessors.push({task: allProducersCuts[i-1], delay: -overlapDays});
             }
         }
-
-        const finalWrapDate = shootingBlocks.length > 0 ? new Date(Math.max(...shootingBlocks.map(b => b.endDate.getTime()))) : new Date();
-        const shootWrapAnchor = { id: 'shoot-wrap-anchor', isScheduled: true, scheduledEndDate: finalWrapDate };
-        
-        const allProducersCuts = masterTaskList.filter(t => t.info.name === "Producer's Cut").sort((a, b) => a.epId - b.epId);
-        for (let i = 0; i < allProducersCuts.length; i++) {
-            if(!allProducersCuts[i].isManuallySet) {
-                if (!producersCutsPreWrap && i === 0) {
-                    allProducersCuts[i].predecessors.push({task: shootWrapAnchor, delay: 0});
-                }
-                if (i > 0) {
-                    const overlapDays = producersCutsOverlap ? Math.floor(allProducersCuts[i-1].info.duration / 2) : 0;
-                    allProducersCuts[i].predecessors.push({task: allProducersCuts[i-1], delay: -overlapDays});
-                }
+    }
+    
+    // Continue with director sequencing logic
+    const episodeShootOrder = shootingBlocks.flatMap(block => block.episodes);
+    const uniqueDirectors = [...new Set(Object.values(directorAssignments))];
+    uniqueDirectors.forEach(directorName => {
+        const directorEpsInShootOrder = episodeShootOrder.filter(epId => directorAssignments[epId] === directorName);
+        for (let i = 1; i < directorEpsInShootOrder.length; i++) {
+            const prevEpId = directorEpsInShootOrder[i - 1];
+            const currentEpId = directorEpsInShootOrder[i];
+            const prevDCv2 = masterTaskList.find(t => t.epId === prevEpId && t.info.name === "Director's Cut v2");
+            const currentDC = masterTaskList.find(t => t.epId === currentEpId && t.info.name === "Director's Cut");
+            if (prevDCv2 && currentDC && !currentDC.isManuallySet) {
+                currentDC.predecessors.push({ task: prevDCv2, delay: 0 });
             }
         }
-        
-        const episodeShootOrder = shootingBlocks.flatMap(block => block.episodes);
-        const uniqueDirectors = [...new Set(Object.values(directorAssignments))];
-        uniqueDirectors.forEach(directorName => {
-            const directorEpsInShootOrder = episodeShootOrder.filter(epId => directorAssignments[epId] === directorName);
-            for (let i = 1; i < directorEpsInShootOrder.length; i++) {
-                const prevEpId = directorEpsInShootOrder[i - 1];
-                const currentEpId = directorEpsInShootOrder[i];
-                const prevDCv2 = masterTaskList.find(t => t.epId === prevEpId && t.info.name === "Director's Cut v2");
-                const currentDC = masterTaskList.find(t => t.epId === currentEpId && t.info.name === "Director's Cut");
-                if (prevDCv2 && currentDC && !currentDC.isManuallySet) {
-                    currentDC.predecessors.push({ task: prevDCv2, delay: 0 });
-                }
+    });
+
+    // Rest of the scheduling algorithm remains the same...
+    let personnelAvailability = {};
+    const allPersonnel = new Set();
+    masterTaskList.forEach(task => task.resources.forEach(r => r && allPersonnel.add(r)));
+    allPersonnel.forEach(p => personnelAvailability[p] = new Date('1970-01-01'));
+    
+    // Pre-block personnel for manually set tasks
+    masterTaskList.filter(t => t.isManuallySet && t.isScheduled).forEach(task => {
+        task.resources.forEach(resource => {
+            if (resource) {
+                personnelAvailability[resource] = findNextBusinessDay(task.scheduledEndDate, task.info.department, task.epId, task.resources);
             }
         });
+    });
 
-        let personnelAvailability = {};
-        const allPersonnel = new Set();
-        masterTaskList.forEach(task => task.resources.forEach(r => r && allPersonnel.add(r)));
-        allPersonnel.forEach(p => personnelAvailability[p] = new Date('1970-01-01'));
+    let scheduledCount = masterTaskList.filter(t => t.isScheduled).length;
+    let safetyBreak = 0;
+    
+    while (scheduledCount < masterTaskList.length) {
+        if (++safetyBreak > masterTaskList.length * 200) {
+            console.error("Scheduling loop terminated for safety."); 
+            break; 
+        }
         
-        masterTaskList.filter(t => t.isManuallySet).forEach(task => {
-            task.isScheduled = true;
-            task.scheduledEndDate = addBusinessDays(task.scheduledStartDate, task.info.duration, task.info.department, task.epId, task.resources);
-            task.resources.forEach(resource => {
-                if (resource) personnelAvailability[resource] = findNextBusinessDay(task.scheduledEndDate, task.info.department, task.epId, task.resources);
-            });
-        });
-
-        let scheduledCount = masterTaskList.filter(t => t.isScheduled).length;
-        let safetyBreak = 0;
-        while (scheduledCount < masterTaskList.length) {
-            if (++safetyBreak > masterTaskList.length * 200) {
-                console.error("Scheduling loop terminated for safety."); 
-                break; 
+        let availableTasks = masterTaskList.filter(t => !t.isScheduled && t.predecessors.every(p => p.task && p.task.isScheduled));
+        if (availableTasks.length === 0) {
+            if(masterTaskList.some(t => !t.isScheduled)) {
+                console.error("Scheduling failed. Circular dependency likely.", masterTaskList.filter(t=>!t.isScheduled));
             }
-            
-            let availableTasks = masterTaskList.filter(t => !t.isScheduled && t.predecessors.every(p => p.task.isScheduled));
-            if (availableTasks.length === 0) {
-                if(masterTaskList.some(t => !t.isScheduled)) console.error("Scheduling failed. Circular dependency likely.", masterTaskList.filter(t=>!t.isScheduled));
-                break;
+            break;
+        }
+        
+        // Continue with the rest of the scheduling logic...
+        availableTasks.forEach(task => {
+            let dependencyStartDate = new Date('1970-01-01');
+            if (task.predecessors.length > 0) {
+                const endDates = task.predecessors.map(p => {
+                    const predEndDate = new Date(p.task.scheduledEndDate.getTime());
+                    if (p.delay < 0) {
+                        return subtractBusinessDays(predEndDate, -p.delay, task.info.department, task.epId, task.resources);
+                    }
+                    return p.delay > 0 ? addBusinessDays(predEndDate, p.delay, task.info.department, task.epId, task.resources) : predEndDate;
+                });
+                dependencyStartDate = findNextBusinessDay(new Date(Math.max(...endDates.map(d => d.getTime()))), task.info.department, task.epId, task.resources);
+            } else if (task.info.name === "Editor's Cut" && episodesData[task.epId].blockWrapDate) {
+                dependencyStartDate = findNextBusinessDay(episodesData[task.epId].blockWrapDate, task.info.department, task.epId, task.resources);
             }
-            
-            availableTasks.forEach(task => {
-                let dependencyStartDate = new Date('1970-01-01');
-                if (task.predecessors.length > 0) {
-                    const endDates = task.predecessors.map(p => {
-                        const predEndDate = new Date(p.task.scheduledEndDate.getTime());
-                        if (p.delay < 0) {
-                            return subtractBusinessDays(predEndDate, -p.delay, task.info.department, task.epId, task.resources);
-                        }
-                        return p.delay > 0 ? addBusinessDays(predEndDate, p.delay, task.info.department, task.epId, task.resources) : predEndDate;
-                    });
-                    dependencyStartDate = findNextBusinessDay(new Date(Math.max(...endDates.map(d => d.getTime()))), task.info.department, task.epId, task.resources);
-                } else if (task.info.name === "Editor's Cut" && episodesData[task.epId].blockWrapDate) {
-                    dependencyStartDate = findNextBusinessDay(episodesData[task.epId].blockWrapDate, task.info.department, task.epId, task.resources);
-                }
 
-                let resourceStartDate = new Date('1970-01-01');
-                if (task.resources.length > 0) {
-                    const resourceAvailDates = task.resources.filter(r => r).map(resourceName => {
-                        let availableFrom = personnelAvailability[resourceName] ? new Date(personnelAvailability[resourceName].getTime()) : new Date('1970-01-01');
-                        const directorShootBlocks = shootingBlocks.filter(b => b.director === resourceName);
-                        if (directorShootBlocks.length > 0) {
-                            let isBlocked = true;
-                            while (isBlocked) {
-                                isBlocked = false;
-                                for (const block of directorShootBlocks) {
-                                    const taskEndDate = addBusinessDays(availableFrom, task.info.duration, task.info.department, task.epId, task.resources);
-                                    if (Math.max(availableFrom.getTime(), block.startDate.getTime()) < Math.min(taskEndDate.getTime(), block.endDate.getTime())) {
-                                        availableFrom = findNextBusinessDay(block.endDate, task.info.department, task.epId, task.resources);
-                                        isBlocked = true; break; 
-                                    }
+            let resourceStartDate = new Date('1970-01-01');
+            if (task.resources.length > 0) {
+                const resourceAvailDates = task.resources.filter(r => r).map(resourceName => {
+                    let availableFrom = personnelAvailability[resourceName] ? new Date(personnelAvailability[resourceName].getTime()) : new Date('1970-01-01');
+                    const directorShootBlocks = shootingBlocks.filter(b => b.director === resourceName);
+                    if (directorShootBlocks.length > 0) {
+                        let isBlocked = true;
+                        while (isBlocked) {
+                            isBlocked = false;
+                            for (const block of directorShootBlocks) {
+                                const taskEndDate = addBusinessDays(availableFrom, task.info.duration, task.info.department, task.epId, task.resources);
+                                if (Math.max(availableFrom.getTime(), block.startDate.getTime()) < Math.min(taskEndDate.getTime(), block.endDate.getTime())) {
+                                    availableFrom = findNextBusinessDay(block.endDate, task.info.department, task.epId, task.resources);
+                                    isBlocked = true; 
+                                    break; 
                                 }
                             }
                         }
-                        return availableFrom.getTime();
-                    });
-                    if(resourceAvailDates.length > 0) {
-                        resourceStartDate = new Date(Math.max(...resourceAvailDates));
                     }
+                    return availableFrom.getTime();
+                });
+                if(resourceAvailDates.length > 0) {
+                    resourceStartDate = new Date(Math.max(...resourceAvailDates));
                 }
-                
-                let baseStart = Math.max(dependencyStartDate.getTime(), resourceStartDate.getTime());
-                if (task.manualStartDate instanceof Date && !isNaN(task.manualStartDate.getTime())) {
-                    baseStart = Math.max(baseStart, task.manualStartDate.getTime());
-                }
-                task.potentialStartDate = new Date(baseStart);
-            });
+            }
             
-            availableTasks.sort((a, b) => a.potentialStartDate - b.potentialStartDate || a.info.priority - b.info.priority || a.epId - b.epId);
+            let baseStart = Math.max(dependencyStartDate.getTime(), resourceStartDate.getTime());
 
-            const taskToSchedule = availableTasks[0];
-            if (!taskToSchedule) break;
+// ENHANCED: Handle manual start dates from unlinked mode
+if (task.manualStartDate instanceof Date && !isNaN(task.manualStartDate.getTime())) {
+    // In unlinked mode, respect the manual date but also consider dependencies
+    if (task.isManuallySet) {
+        // If it's fully manual, use the manual date exactly
+        baseStart = task.manualStartDate.getTime();
+    } else {
+        // If it's unlinked manual, use the later of manual date or dependencies
+        baseStart = Math.max(baseStart, task.manualStartDate.getTime());
+    }
+}
 
-            let effectiveStartDate = new Date(taskToSchedule.potentialStartDate.getTime());
-            while (!isBusinessDay(effectiveStartDate, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources)) {
-                effectiveStartDate.setUTCDate(effectiveStartDate.getUTCDate() + 1);
-            }
+task.potentialStartDate = new Date(baseStart);
+        });
+        
+        availableTasks.sort((a, b) => a.potentialStartDate - b.potentialStartDate || a.info.priority - b.info.priority || a.epId - b.epId);
 
-            taskToSchedule.scheduledStartDate = effectiveStartDate;
-            taskToSchedule.scheduledEndDate = addBusinessDays(taskToSchedule.scheduledStartDate, taskToSchedule.info.duration, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources);
-            taskToSchedule.isScheduled = true;
-            scheduledCount++;
+        const taskToSchedule = availableTasks[0];
+        if (!taskToSchedule) break;
 
-            if (taskToSchedule.manualStartDate) {
-                delete taskToSchedule.manualStartDate;
-            }
-
-            taskToSchedule.resources.forEach(resource => {
-                if (resource) personnelAvailability[resource] = findNextBusinessDay(taskToSchedule.scheduledEndDate, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources);
-            });
+        let effectiveStartDate = new Date(taskToSchedule.potentialStartDate.getTime());
+        while (!isBusinessDay(effectiveStartDate, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources)) {
+            effectiveStartDate.setUTCDate(effectiveStartDate.getUTCDate() + 1);
         }
-        masterTaskList.forEach(task => { if(task.isScheduled) episodesData[task.epId].tasks.push(task); });
-        calculateReleaseDates();
+
+        taskToSchedule.scheduledStartDate = effectiveStartDate;
+        taskToSchedule.scheduledEndDate = addBusinessDays(taskToSchedule.scheduledStartDate, taskToSchedule.info.duration, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources);
+        taskToSchedule.isScheduled = true;
+        scheduledCount++;
+
+        if (taskToSchedule.manualStartDate) {
+            delete taskToSchedule.manualStartDate;
+        }
+
+        taskToSchedule.resources.forEach(resource => {
+            if (resource) personnelAvailability[resource] = findNextBusinessDay(taskToSchedule.scheduledEndDate, taskToSchedule.info.department, taskToSchedule.epId, taskToSchedule.resources);
+        });
     }
     
+    masterTaskList.forEach(task => { 
+        if(task.isScheduled) episodesData[task.epId].tasks.push(task); 
+    });
+    calculateReleaseDates();
+    
+    // Final validation that manual anchors are still respected
+    validateManualAnchors(manuallySetTasks);
+}
+
     function calculateReleaseDates() {
         masterTaskList = masterTaskList.filter(t => t.info.name !== "Earliest Possible Release");
 
         const daysToAirValue = parseInt(document.getElementById('days-to-air').value);
         if (isNaN(daysToAirValue)) return;
-        
+
         const airUnit = document.getElementById('air-unit').value;
         const daysToAdd = airUnit === 'weeks' ? daysToAirValue * 7 : daysToAirValue;
         const weekInMillis = 7 * 24 * 60 * 60 * 1000;
 
         const qcTasks = masterTaskList.filter(t => t.info.name === "Deliver to QC v1").sort((a,b) => a.epId - b.epId);
         if(qcTasks.length === 0) return;
-        
+
         let initialReleaseDates = qcTasks.map(qcTask => {
             const releaseDate = new Date(qcTask.scheduledEndDate.getTime());
             releaseDate.setUTCDate(releaseDate.getUTCDate() + daysToAdd);
@@ -991,12 +2076,12 @@ document.addEventListener('DOMContentLoaded', () => {
             episodesData[releaseInfo.epId].tasks.push(releaseTask);
         });
     }
-    
+
     // --- RENDERING FUNCTIONS ---
     function checkForConflicts() {
         const personnelCommitments = {};
         const shootingBlocks = getShootingBlocks();
-        
+
         masterTaskList.forEach(task => task.hasConflict = false);
         shootingBlocks.forEach(block => block.hasConflict = false);
 
@@ -1007,7 +2092,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!personnelCommitments[resource]) personnelCommitments[resource] = [];
                     personnelCommitments[resource].push({
                         id: task.id, type: 'task', startDate: task.scheduledStartDate,
-                        endDate: task.scheduledEndDate, sourceObject: task 
+                        endDate: task.scheduledEndDate, sourceObject: task
                     });
                 }
             });
@@ -1018,7 +2103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!personnelCommitments[block.director]) personnelCommitments[block.director] = [];
                 personnelCommitments[block.director].push({
                     id: `block-${block.blockIndex}`, type: 'shoot', startDate: block.startDate,
-                    endDate: block.endDate, sourceObject: block 
+                    endDate: block.endDate, sourceObject: block
                 });
             }
         });
@@ -1029,7 +2114,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (let i = 0; i < commitments.length - 1; i++) {
                 const currentCommitment = commitments[i];
                 const nextCommitment = commitments[i+1];
-                
+
                 if (currentCommitment.endDate >= nextCommitment.startDate) {
                     currentCommitment.sourceObject.hasConflict = true;
                     nextCommitment.sourceObject.hasConflict = true;
@@ -1042,8 +2127,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderGanttChart() {
         checkForConflicts();
         const container = document.getElementById('gantt-container');
-        container.innerHTML = ''; 
-        
+        container.innerHTML = '';
+
         const startOfPhotography = new Date(document.getElementById('start-of-photography').value + 'T12:00:00Z');
 
         let chartStartDate = new Date(startOfPhotography.getTime());
@@ -1061,7 +2146,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         overallMinDate = (earliestTaskDate < chartStartDate && earliestTaskDate.getFullYear() > 1970) ? earliestTaskDate : chartStartDate;
-        
+
         if (latestTaskDate < overallMinDate || latestTaskDate.getFullYear() < 1971) {
             overallMaxDate = new Date(overallMinDate.getTime());
             overallMaxDate.setUTCMonth(overallMaxDate.getUTCMonth() + 6);
@@ -1085,10 +2170,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
         const monthHeaders = {};
         const weekHeaders = {};
-        
+
         let currentWeekKey = null;
         const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-        
+
         days.forEach((d) => {
             const monthYear = `${monthNames[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
             if (!monthHeaders[monthYear]) monthHeaders[monthYear] = 0;
@@ -1104,30 +2189,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentWeekKey = `week-${weekStartDateStr}`;
                 weekHeaders[currentWeekKey] = { count: 0 };
             }
-            
+
             if (weekHeaders[currentWeekKey]) {
                 weekHeaders[currentWeekKey].count++;
             }
         });
-        
+
         const finalWeekHeaders = {};
         let shootWeekNum = 1;
         let postWeekNum = 1;
         const shootingBlocks = getShootingBlocks();
         const wrapOfPhotography = shootingBlocks.length > 0 ? shootingBlocks[shootingBlocks.length-1].endDate : null;
 
-        // --- FIX: Logic to start Post Week 1 immediately after the final shoot week ---
         let finalShootWeekStartDate = null;
         if (wrapOfPhotography) {
             finalShootWeekStartDate = new Date(wrapOfPhotography.getTime());
-            // Find the Sunday that starts the week of the wrap date
             finalShootWeekStartDate.setUTCDate(finalShootWeekStartDate.getUTCDate() - finalShootWeekStartDate.getUTCDay());
         }
 
         for(const key in weekHeaders){
             const week = weekHeaders[key];
             const weekStartDate = new Date(key.replace('week-', '') + 'T12:00:00Z');
-            
+
             let label;
 
             if (weekStartDate < startOfPhotography) {
@@ -1137,7 +2220,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 label = `Shoot Week ${shootWeekNum++}`;
             }
-            
+
             const lastLabel = Object.keys(finalWeekHeaders).pop();
             if (lastLabel === label) {
                  finalWeekHeaders[label] += week.count;
@@ -1151,16 +2234,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const dateString = toYYYYMMDD(d);
             const month = d.getUTCMonth();
             const day = d.getUTCDate();
-            
+
             if ((month === 2 && day === 31) || (month === 5 && day === 30) || (month === 8 && day === 30) || (month === 11 && day === 31)) {
                 classes.push('quarter-end');
             }
-            
+
             const sixthDayAuths = sixthDayWorkDates.filter(auth => auth.date === dateString);
             let isWorkDay = false;
             if (sixthDayAuths.length > 0) {
                 for(const auth of sixthDayAuths) {
-                    if (auth.scope === 'all' || 
+                    if (auth.scope === 'all' ||
                         (epId !== null && auth.scope === 'episode' && auth.value == epId) ||
                         (resources.length > 0 && auth.scope === 'resource' && resources.includes(auth.value))) {
                         classes.push('sixth-work-day');
@@ -1200,7 +2283,7 @@ document.addEventListener('DOMContentLoaded', () => {
             days.forEach((d, i) => {
                 const holiday = getHolidayForDate(d, 'EDIT');
                 if (holiday && holiday.name && !processedHolidays.has(holiday.name)) {
-                    
+
                     let firstDayIndex = i;
                     let lastDayIndex = i;
                     if(i > 0 && getHolidayForDate(days[i-1], 'EDIT')?.name === holiday.name) {
@@ -1228,7 +2311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             episodeHeaderTimelineHTML += `</div>`;
-            
+
             ganttBodyHTML += `<div class="episode-header-label" data-ep-id="${epId}">
                                     <div class="episode-title-group">
                                         <div class="episode-expand-icon">+</div>
@@ -1256,7 +2339,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     }).join('')}
                                 </div>`;
         });
-        
+
         const timelineHeaderHTML = `<div class="gantt-header-title"></div>
             <div class="timeline-header-wrapper">
                 <div class="timeline-header" style="width: calc(${days.length} * var(--day-column-width));">
@@ -1274,9 +2357,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         chart.innerHTML = timelineHeaderHTML + ganttBodyHTML;
         container.appendChild(chart);
-        
+
         const diffDays = (d1, d2) => Math.floor((Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth(), d1.getUTCDate()) - Date.UTC(d2.getUTCFullYear(), d2.getUTCMonth(), d2.getUTCDate())) / 86400000);
-        
+
         shootingBlocks.forEach(block => {
             block.episodes.forEach(epId => {
                 ['shoot', 'summary'].forEach(rowType => {
@@ -1311,7 +2394,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const bar = document.createElement('div');
                     bar.className = 'task-bar';
                     if (task.hasConflict) bar.classList.add('conflict');
-                    bar.id = `task-bar-${task.id}${isSummary ? '-summary' : ''}`; 
+                    bar.id = `task-bar-${task.id}${isSummary ? '-summary' : ''}`;
                     bar.textContent = task.info.name;
                     bar.style.left = `calc(${startIndex} * var(--day-column-width))`;
                     bar.style.width = `calc(${durationDays} * var(--day-column-width))`;
@@ -1321,7 +2404,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     bar.title = `${task.info.name}\nEP: ${epId + 1}\n${task.scheduledStartDate.toLocaleDateString('en-CA', {timeZone: 'UTC'})} - ${task.scheduledEndDate.toLocaleDateString('en-CA', {timeZone: 'UTC'})}`;
                     return bar;
                 };
-                
+
                 const dept = task.info.name === 'Earliest Possible Release' ? 'DELIVERY' : task.info.department;
                 const rowId = dept.toLowerCase().replace(/\s/g, '-');
                 const deptRow = document.getElementById(`row-ep-${epId}-${rowId}`);
@@ -1332,7 +2415,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- NEW HELPER FUNCTIONS for Grid Columns ---
     function getMaxStudioCuts() {
         let maxCuts = 0;
         if (!episodesData || episodesData.length === 0) return 0;
@@ -1360,8 +2442,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const table = document.getElementById('schedule-grid');
         table.innerHTML = '';
         if (episodesData.length === 0) return;
-        
-        // If columns haven't been configured yet (e.g., first run), set them to all available.
+
         if (!gridVisibleColumns) {
             gridVisibleColumns = getCurrentAllGridColumns();
         }
@@ -1371,7 +2452,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const gridData = episodesData.map((ep, epId) => {
             const epTasks = masterTaskList.filter(t => t.epId === epId && t.isScheduled);
-            
+
             const findDate = (name) => {
                 const task = epTasks.find(t => t.info.name.startsWith(name));
                 return task ? task.scheduledEndDate : null;
@@ -1421,7 +2502,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        
+
         const currentAllCols = getCurrentAllGridColumns();
         const displayedHeaders = currentAllCols.filter(col => gridVisibleColumns.includes(col));
         if (!displayedHeaders.includes('EP')) {
@@ -1437,7 +2518,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const shootingBlocks = getShootingBlocks();
         const shootPeriodStart = shootingBlocks.length > 0 ? formatDate(shootingBlocks[0].startDate) : 'N/A';
         const shootPeriodEnd = shootingBlocks.length > 0 ? formatDate(shootingBlocks[shootingBlocks.length - 1].endDate) : 'N/A';
-        
+
         let topHeaderHTML = `
         <thead>
             <tr>
@@ -1466,7 +2547,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (gridVisibleColumns.includes("Editor's Cut")) bodyHTML += `<td>${row.editorsCut}</td>`;
             if (gridVisibleColumns.includes("Director's Cut")) bodyHTML += `<td>${row.directorsCut}</td>`;
             if (gridVisibleColumns.includes("Producer's Cut")) bodyHTML += `<td>${row.producersCut}</td>`;
-            
+
             for (let i = 0; i < maxStudioCuts; i++) {
                 if (gridVisibleColumns.includes(`S/N Cut #${i + 1}`)) {
                     bodyHTML += `<td>${row.studioCuts[i] || ''}</td>`;
@@ -1491,10 +2572,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById('waterfall-container');
         container.innerHTML = '';
         if (masterTaskList.length === 0 || !overallMinDate || !overallMaxDate || isNaN(overallMinDate.getTime()) || isNaN(overallMaxDate.getTime())) return;
-        
+
         const diffDays = (d1, d2) => Math.floor((Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth(), d1.getUTCDate()) - Date.UTC(d2.getUTCFullYear(), d2.getUTCMonth(), d2.getUTCDate())) / 86400000);
         const dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-        
+
         const days = [];
         let currentDate = new Date(Date.UTC(overallMinDate.getUTCFullYear(), overallMinDate.getUTCMonth(), overallMinDate.getUTCDate()));
         const lastDate = new Date(Date.UTC(overallMaxDate.getUTCFullYear(), overallMaxDate.getUTCMonth(), overallMaxDate.getUTCDate()));
@@ -1502,11 +2583,11 @@ document.addEventListener('DOMContentLoaded', () => {
             days.push(new Date(currentDate));
             currentDate.setUTCDate(currentDate.getUTCDate() + 1);
         }
-        
+
         const chart = document.createElement('div');
         chart.className = 'waterfall-chart';
         const departments = ['Summary', 'Shoot', 'EDIT', 'MUSIC', 'VFX', 'PICTURE', 'SOUND', 'DELIVERY'];
-        
+
         let headerHTML = `<div class="waterfall-header">
                                     <div class="waterfall-date-col waterfall-week-col">Wk#</div>
                                     <div class="waterfall-date-col waterfall-day-of-week-col">Day</div>
@@ -1529,11 +2610,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>`;
         });
         headerHTML += '</div>';
-        
+
         let bodyHTML = '<div class="waterfall-body">';
         let weekNum = 1;
         const startOfPhotography = new Date(document.getElementById('start-of-photography').value + 'T12:00:00Z');
-        
+
         let weekColHTML = `<div class="waterfall-date-col waterfall-week-col">${days.map(d => {
             let weekLabel = '&nbsp;';
             if (d.getUTCDay() === 1 && d >= startOfPhotography) {
@@ -1541,21 +2622,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return `<div class="waterfall-date-label">${weekLabel}</div>`;
         }).join('')}</div>`;
-        
+
         let dayOfWeekColHTML = `<div class="waterfall-date-col waterfall-day-of-week-col">${days.map(d => `<div class="waterfall-date-label">${dayNames[d.getUTCDay()]}</div>`).join('')}</div>`;
-        
+
         let dateColHTML = `<div class="waterfall-date-col waterfall-day-col">${days.map((d, i) => {
             const isQuarterEnd = (d.getUTCMonth() === 2 && d.getUTCDate() === 31) || (d.getUTCMonth() === 5 && d.getUTCDate() === 30) || (d.getUTCMonth() === 8 && d.getUTCDate() === 30) || (d.getUTCMonth() === 11 && d.getUTCDate() === 31);
             return `<div class="waterfall-date-label ${isQuarterEnd ? 'quarter-end' : ''}" data-row-index="${i}">${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}</div>`
         }).join('')}</div>`;
-        
+
         let epColsHTML = '<div class="waterfall-timeline" style="display: flex;">';
         episodesData.forEach((ep, epId) => {
             epColsHTML += `<div class="waterfall-ep-column" id="waterfall-ep-col-${epId}" style="width: var(--waterfall-ep-col-width); display:flex;">`;
-            
+
             departments.forEach(dept => {
                 epColsHTML += `<div class="waterfall-dept-column" data-dept="${dept.toLowerCase()}" style="width: ${dept === 'Summary' ? 'var(--waterfall-ep-col-width)' : 'var(--waterfall-dept-col-width)'}; ${dept === 'Summary' ? '' : 'display:none;'}">`;
-                
+
                 days.forEach((d, i) => {
                     let dayClasses = 'waterfall-day-row';
                     const holidayCheckDept = (dept === 'Summary' || dept === 'Shoot') ? 'EDIT' : dept;
@@ -1575,12 +2656,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (!isBusinessDay(d, holidayCheckDept, epId, ep.editors.concat(ep.director))) {
                         dayClasses += ' non-work-day';
                     }
-                    
+
                     epColsHTML += `<div class="${dayClasses}" data-row-index="${i}" data-date-iso="${d.toISOString()}">
                                                 ${holiday ? `<span class="holiday-name">${holiday.name}</span>` : ''}
                                             </div>`;
                 });
-                
+
                 let tasksForDept = [];
                 if (dept === 'Summary') {
                     tasksForDept = masterTaskList.filter(t => t.epId === epId && t.isScheduled && t.info.visible);
@@ -1612,21 +2693,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     let classList = 'waterfall-task-bar';
                     if(task.hasConflict) classList += ' conflict';
 
-                    epColsHTML += `<div 
-                                            class="${classList}" 
+                    epColsHTML += `<div
+                                            class="${classList}"
                                             id="w-task-bar__${task.id}__${dept.toLowerCase()}"
-                                            style="top: ${top}px; height: ${height-2}px; background-color: ${taskColor}" 
+                                            style="top: ${top}px; height: ${height-2}px; background-color: ${taskColor}"
                                             title="${task.info.name}">
                                             ${task.info.name}
                                         </div>`;
                 });
-                
+
                 epColsHTML += `</div>`;
             });
             epColsHTML += `</div>`;
         });
         epColsHTML += '</div>';
-        
+
         bodyHTML += weekColHTML + dayOfWeekColHTML + dateColHTML + epColsHTML + '</div>';
         chart.innerHTML = headerHTML + bodyHTML;
         container.appendChild(chart);
@@ -1643,7 +2724,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const epNumber = parseInt(parts[0].trim(), 10);
                     const days = parseInt(parts[1].trim(), 10);
                     if (!isNaN(epNumber) && !isNaN(days) && epNumber > 0) {
-                        overrides[epNumber - 1] = days; // Store as 0-indexed episode ID
+                        overrides[epNumber - 1] = days;
                     }
                 }
             });
@@ -1697,21 +2778,64 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return shootingBlocks;
     }
+
+    function releaseAnchors(task) {
+        if (!task || !task.isManuallySet) return;
+
+        unanchorTaskAndSuccessors(task);
+        calculateAndRender();
+    }
+
+    function unanchorTaskAndSuccessors(task) {
+        if (!task || !task.isManuallySet) return;
+        task.isManuallySet = false;
+
+        const successors = masterTaskList.filter(t => (t.originalPredecessors || []).some(p => p.task.id === task.id));
+        successors.forEach(s => unanchorTaskAndSuccessors(s));
+    }
     
-    // --- UI INTERACTION (Event Delegation for Expand/Collapse) ---
+    function applyOffsetToSuccessors(task, offset) {
+        if (!task || offset === 0) return;
+    
+        // Move the current task
+        task.scheduledStartDate = addBusinessDaysWithOffset(task.scheduledStartDate, offset, task.info.department, task.epId, task.resources);
+        task.scheduledEndDate = addBusinessDays(task.scheduledStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+        task.isManuallySet = true;
+    
+        // Find all tasks that have this task as a direct predecessor
+        const successors = masterTaskList.filter(t => t.predecessors.some(p => p.task.id === task.id));
+    
+        // Recursively call this function for each successor
+        successors.forEach(s => applyOffsetToSuccessors(s, offset));
+    }
+
+
     function setupAllEventListeners() {
         const ganttContainer = document.getElementById('gantt-container');
         const waterfallContainer = document.getElementById('waterfall-container');
 
         ganttContainer.addEventListener('click', (e) => {
+            const bar = e.target.closest('.task-bar');
+            if (bar && !e.target.closest('.personnel-stack')) {
+                let taskId = bar.id.replace('task-bar-', '').replace('-summary', '');
+                const task = masterTaskList.find(t => t.id === taskId);
+
+                if (task && task.isManuallySet) {
+                    if (confirm('This task was moved manually. Do you want to release it and have it reschedule automatically?')) {
+                        releaseAnchors(task);
+                    }
+                    return;
+                }
+            }
+
             const header = e.target.closest('.episode-header-label');
             if (header && !e.target.closest('.personnel-stack')) {
                 const epId = header.dataset.epId;
                 const tasksContainer = document.getElementById(`tasks-ep-${epId}`);
                 const summaryContainer = document.getElementById(`summary-ep-${epId}`);
-                
+
                 const isExpanded = header.classList.toggle('expanded');
-                
+
                 if (tasksContainer && summaryContainer) {
                     tasksContainer.classList.toggle('collapsed');
                     summaryContainer.classList.toggle('collapsed');
@@ -1719,26 +2843,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        
+
         waterfallContainer.addEventListener('click', (e) => {
             const header = e.target.closest('.waterfall-ep-header');
-            if(header){
+            if (header) {
                 const isExpanded = header.classList.toggle('expanded');
                 header.querySelector('.episode-expand-icon').textContent = isExpanded ? '−' : '+';
-        
+
                 const epId = header.dataset.epId;
                 const headerGroup = document.getElementById(`waterfall-header-ep-${epId}`);
                 const epCol = document.getElementById(`waterfall-ep-col-${epId}`);
-                
+
                 const deptHeaders = headerGroup.querySelectorAll('.waterfall-dept-col');
                 const deptCols = epCol.querySelectorAll('.waterfall-dept-column');
                 const departments = ['Summary', 'Shoot', 'EDIT', 'MUSIC', 'VFX', 'PICTURE', 'SOUND', 'DELIVERY'];
-                
+
                 if (isExpanded) {
                     const expandedWidth = `calc(var(--waterfall-dept-col-width) * ${departments.length - 1})`;
                     headerGroup.style.width = expandedWidth;
                     epCol.style.width = expandedWidth;
-                    
+
                     deptHeaders.forEach(dh => {
                         dh.style.display = dh.dataset.dept === 'summary' ? 'none' : 'flex';
                     });
@@ -1761,106 +2885,299 @@ document.addEventListener('DOMContentLoaded', () => {
         addManualDragListeners();
         addWaterfallDragListeners();
     }
+
+    function anchorTaskAndPredecessors(task) {
+        if (!task || task.isManuallySet) return;
+
+        task.isManuallySet = true;
+        if (task.predecessors) {
+            task.predecessors.forEach(p => {
+                if (p && p.task) {
+                    anchorTaskAndPredecessors(p.task);
+                }
+            });
+        }
+    }
+
+    // Enhanced drag listener functions that better handle the different modes
+function addManualDragListeners() {
+    let draggedState = null;
+    let ghostElement = null;
+    let currentDropTarget = null;
     
-    function addManualDragListeners() {
-        let draggedState = null;
-        let ghostElement = null;
-        let currentDropTarget = null;
-
-        const onMouseDown = (e) => {
-            if (e.button !== 0) return;
-            const bar = e.target.closest('.task-bar');
-            if (!bar || bar.textContent.toLowerCase().includes('shoot')) return;
-            
-            let taskId = bar.id.replace('task-bar-', '').replace('-summary', '');
-            const task = taskId ? masterTaskList.find(t => t.id === taskId) : null;
-            if (!task) return;
-
-            ghostElement = bar.cloneNode(true);
-            ghostElement.classList.add('ghost');
-            document.body.appendChild(ghostElement);
-            ghostElement.style.width = `${bar.offsetWidth}px`;
-            ghostElement.style.left = `${e.clientX - (bar.offsetWidth / 2)}px`;
-            ghostElement.style.top = `${e.clientY - (bar.offsetHeight / 2)}px`;
-            
-            draggedState = { taskObject: task, element: bar };
-            bar.classList.add('dragging');
-
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp, { once: true });
-        };
-
-        const onMouseMove = (e) => {
-            if (!draggedState) return;
-            
-            ghostElement.style.left = `${e.clientX - (ghostElement.offsetWidth / 2)}px`;
-            ghostElement.style.top = `${e.clientY - (ghostElement.offsetHeight / 2)}px`;
-            
-            ghostElement.style.display = 'none';
-            const newDropTarget = document.elementFromPoint(e.clientX, e.clientY)?.closest('.grid-cell');
-            ghostElement.style.display = '';
-
-            if (currentDropTarget && currentDropTarget !== newDropTarget) {
-                currentDropTarget.classList.remove('drop-target');
-            }
-            if (newDropTarget && newDropTarget.dataset.dateIso) {
-                newDropTarget.classList.add('drop-target');
-                currentDropTarget = newDropTarget;
-            } else {
-                currentDropTarget = null;
-            }
-        };
-
-        const onMouseUp = (e) => {
-            if (ghostElement) ghostElement.remove();
-            if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
-            if (!draggedState) {
-                document.removeEventListener('mousemove', onMouseMove);
-                return;
-            }
-            draggedState.element.classList.remove('dragging');
+    const onMouseDown = (e) => {
+        if (e.button !== 0) return;
+        const bar = e.target.closest('.task-bar');
+        if (!bar || bar.textContent.toLowerCase().includes('shoot')) return;
+        
+        let taskId = bar.id.replace('task-bar-', '').replace('-summary', '');
+        const task = taskId ? masterTaskList.find(t => t.id === taskId) : null;
+        if (!task) return;
+        
+        // Enhanced ghost element creation
+        ghostElement = bar.cloneNode(true);
+        ghostElement.classList.add('ghost');
+        ghostElement.style.cssText = `
+            position: fixed; pointer-events: none; z-index: 10000;
+            opacity: 0.8; background-color: #3b82f6; color: white;
+            border: 2px solid #1d4ed8; border-radius: 4px;
+        `;
+        document.body.appendChild(ghostElement);
+        ghostElement.style.width = `${bar.offsetWidth}px`;
+        ghostElement.style.left = `${e.clientX - (bar.offsetWidth / 2)}px`;
+        ghostElement.style.top = `${e.clientY - (bar.offsetHeight / 2)}px`;
+        
+        draggedState = { taskObject: task, element: bar };
+        bar.classList.add('dragging');
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp, { once: true });
+    };
+    
+    const onMouseMove = (e) => {
+        if (!draggedState) return;
+        
+        ghostElement.style.left = `${e.clientX - (ghostElement.offsetWidth / 2)}px`;
+        ghostElement.style.top = `${e.clientY - (ghostElement.offsetHeight / 2)}px`;
+        
+        ghostElement.style.display = 'none';
+        const newDropTarget = document.elementFromPoint(e.clientX, e.clientY)?.closest('.grid-cell');
+        ghostElement.style.display = '';
+        
+        if (currentDropTarget && currentDropTarget !== newDropTarget) {
+            currentDropTarget.classList.remove('drop-target');
+        }
+        if (newDropTarget && newDropTarget.dataset.dateIso) {
+            newDropTarget.classList.add('drop-target');
+            currentDropTarget = newDropTarget;
+        } else {
+            currentDropTarget = null;
+        }
+    };
+    
+    const onMouseUp = (e) => {
+        if (ghostElement) ghostElement.remove();
+        if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
+        if (!draggedState) {
             document.removeEventListener('mousemove', onMouseMove);
+            return;
+        }
+        draggedState.element.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMouseMove);
+        
+        if (currentDropTarget && currentDropTarget.dataset.dateIso) {
+            const newStartDate = new Date(currentDropTarget.dataset.dateIso);
+            const task = draggedState.taskObject;
+            const isLinkedMode = !unlinkToggle.checked;
             
-            if (currentDropTarget && currentDropTarget.dataset.dateIso) {
-                const newStartDate = new Date(currentDropTarget.dataset.dateIso);
-                const task = draggedState.taskObject;
-
-                if (unlinkToggle.checked) {
-                    task.manualStartDate = newStartDate;
-                    task.isManuallySet = false; 
-                    calculateAndRender();
+            // Store original state for potential reversion
+            const originalState = {
+                isManuallySet: task.isManuallySet,
+                scheduledStartDate: task.scheduledStartDate ? new Date(task.scheduledStartDate) : null,
+                scheduledEndDate: task.scheduledEndDate ? new Date(task.scheduledEndDate) : null,
+                predecessors: task.predecessors ? [...task.predecessors] : [],
+                manualStartDate: task.manualStartDate ? new Date(task.manualStartDate) : null
+            };
+            
+            if (isLinkedMode) {
+                // LINKED mode - completely anchor the task
+                task.isManuallySet = true;
+                task.isScheduled = true;
+                task.predecessors = [];
+                task.scheduledStartDate = newStartDate;
+                task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+                
+                // Clean up any existing manual start date
+                if (task.manualStartDate) {
+                    delete task.manualStartDate;
+                }
+                
+                // Check for immediate conflicts with other manually set tasks
+                const immediateConflicts = checkImmediateConflicts(task);
+                if (immediateConflicts.length > 0) {
+                    if (confirm(`This move conflicts with other manually positioned tasks. Proceed anyway?`)) {
+                        renderAllViews();
+                    } else {
+                        // Revert the change
+                        Object.assign(task, originalState);
+                        renderAllViews();
+                    }
                 } else {
-                    task.isManuallySet = true;
-                    task.predecessors = []; 
-                    task.scheduledStartDate = newStartDate; 
-                    task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
                     renderAllViews();
                 }
+            } else {
+                // UNLINKED mode - set manual start date but keep in scheduling system
+                task.manualStartDate = newStartDate;
+                task.isManuallySet = false;
+                
+                // Clean up any previous manual positioning
+                if (originalState.isManuallySet) {
+                    task.isScheduled = false;
+                    // Restore original predecessors if it was previously manually set
+                    if (task.originalPredecessors) {
+                        task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                    }
+                }
+                
+                calculateAndRender();
             }
-            draggedState = null;
-            ghostElement = null;
-        };
+        }
+        draggedState = null;
+        ghostElement = null;
+    };
+    
+    document.getElementById('gantt-container').addEventListener('mousedown', onMouseDown);
+}
 
-        document.getElementById('gantt-container').addEventListener('mousedown', onMouseDown);
-    }
+// Enhanced waterfall drag listeners with the same logic
+function addWaterfallDragListeners() {
+    let draggedState = null;
+    let ghostElement = null;
+    let currentDropTarget = null;
+    
+    const onMouseDown = (e) => {
+        if (e.button !== 0) return;
+        const bar = e.target.closest('.waterfall-task-bar');
+        if (!bar || bar.id.includes('block')) return;
+        
+        const parts = bar.id.split('__');
+        const taskId = parts[1];
+        const task = taskId ? masterTaskList.find(t => t.id === taskId) : null;
+        if (!task) return;
+        
+        // Enhanced ghost element creation
+        ghostElement = bar.cloneNode(true);
+        ghostElement.classList.add('ghost');
+        ghostElement.style.cssText = `
+            position: fixed; pointer-events: none; z-index: 10000;
+            opacity: 0.8; background-color: #3b82f6; color: white;
+            border: 2px solid #1d4ed8; border-radius: 4px;
+        `;
+        document.body.appendChild(ghostElement);
+        ghostElement.style.width = `${bar.offsetWidth}px`;
+        ghostElement.style.height = `${bar.offsetHeight}px`;
+        ghostElement.style.left = `${e.clientX - (bar.offsetWidth / 2)}px`;
+        ghostElement.style.top = `${e.clientY - 15}px`;
+        
+        draggedState = { taskObject: task, element: bar };
+        bar.classList.add('dragging');
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp, { once: true });
+    };
+    
+    const onMouseMove = (e) => {
+        if (!draggedState) return;
+        
+        ghostElement.style.left = `${e.clientX - (ghostElement.offsetWidth / 2)}px`;
+        ghostElement.style.top = `${e.clientY - 15}px`;
+        
+        ghostElement.style.display = 'none';
+        const newDropTarget = document.elementFromPoint(e.clientX, e.clientY)?.closest('.waterfall-day-row');
+        ghostElement.style.display = '';
+        
+        if (currentDropTarget && currentDropTarget !== newDropTarget) {
+            currentDropTarget.classList.remove('drop-target');
+        }
+        if (newDropTarget && newDropTarget.dataset.dateIso) {
+            newDropTarget.classList.add('drop-target');
+            currentDropTarget = newDropTarget;
+        } else {
+            currentDropTarget = null;
+        }
+    };
+    
+    const onMouseUp = (e) => {
+        if (ghostElement) ghostElement.remove();
+        if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
+        if (!draggedState) {
+            document.removeEventListener('mousemove', onMouseMove);
+            return;
+        }
+        draggedState.element.classList.remove('dragging');
+        document.removeEventListener('mousemove', onMouseMove);
+        
+        if (currentDropTarget && currentDropTarget.dataset.dateIso) {
+            const newStartDate = new Date(currentDropTarget.dataset.dateIso);
+            const task = draggedState.taskObject;
+            const isLinkedMode = !unlinkToggle.checked;
+            
+            // Store original state for potential reversion
+            const originalState = {
+                isManuallySet: task.isManuallySet,
+                scheduledStartDate: task.scheduledStartDate ? new Date(task.scheduledStartDate) : null,
+                scheduledEndDate: task.scheduledEndDate ? new Date(task.scheduledEndDate) : null,
+                predecessors: task.predecessors ? [...task.predecessors] : [],
+                manualStartDate: task.manualStartDate ? new Date(task.manualStartDate) : null
+            };
+            
+            if (isLinkedMode) {
+                // LINKED mode - completely anchor the task
+                task.isManuallySet = true;
+                task.isScheduled = true;
+                task.predecessors = [];
+                task.scheduledStartDate = newStartDate;
+                task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+                
+                // Clean up any existing manual start date
+                if (task.manualStartDate) {
+                    delete task.manualStartDate;
+                }
+                
+                // Check for immediate conflicts with other manually set tasks
+                const immediateConflicts = checkImmediateConflicts(task);
+                if (immediateConflicts.length > 0) {
+                    if (confirm(`This move conflicts with other manually positioned tasks. Proceed anyway?`)) {
+                        renderAllViews();
+                    } else {
+                        // Revert the change
+                        Object.assign(task, originalState);
+                        renderAllViews();
+                    }
+                } else {
+                    renderAllViews();
+                }
+            } else {
+                // UNLINKED mode - set manual start date but keep in scheduling system
+                task.manualStartDate = newStartDate;
+                task.isManuallySet = false;
+                
+                // Clean up any previous manual positioning
+                if (originalState.isManuallySet) {
+                    task.isScheduled = false;
+                    // Restore original predecessors if it was previously manually set
+                    if (task.originalPredecessors) {
+                        task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                    }
+                }
+                
+                calculateAndRender();
+            }
+        }
+        draggedState = null;
+        ghostElement = null;
+    };
+    
+    document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
+}
 
     function setupTabControls() {
         const tabButtons = document.querySelectorAll('.tab-button');
         const viewContainers = document.querySelectorAll('.view-container');
         const exportButton = document.getElementById('export-smart');
-        
+
         tabButtons.forEach(button => {
             button.addEventListener('click', () => {
                 tabButtons.forEach(btn => btn.classList.remove('active'));
                 button.classList.add('active');
-                
+
                 currentView = button.id.replace('tab-', '');
                 const viewId = `${currentView}-view`;
-                
+
                 viewContainers.forEach(container => {
                     container.classList.toggle('hidden', container.id !== viewId);
                 });
-                
+
                 if (currentView === 'grid') {
                     renderGridView();
                     viewState.grid = 'fresh';
@@ -1896,8 +3213,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('export-smart').onclick = exportTimelineToExcel;
         document.getElementById('export-calendar').addEventListener('click', exportToICS);
     }
-    
-    // --- EXPORT FUNCTIONS ---
+
     function getFormattedTimestamp() {
         const now = new Date();
         const month = (now.getMonth() + 1).toString().padStart(2, '0');
@@ -1907,7 +3223,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const minutes = now.getMinutes().toString().padStart(2, '0');
         const ampm = hours >= 12 ? 'PM' : 'AM';
         hours = hours % 12;
-        hours = hours ? hours : 12; 
+        hours = hours ? hours : 12;
         const strTime = hours.toString().padStart(2, '0') + ':' + minutes + ' ' + ampm;
         return `${month}/${day}/${year}, ${strTime}`;
     }
@@ -1916,7 +3232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function generateExportFilename() {
         const showCode = document.getElementById('show-code').value.replace(/[^a-z0-9]/gi, '_').toUpperCase() || 'SHOW';
         const version = "v" + document.getElementById('schedule-version').value || "1";
-        
+
         const startDateValue = document.getElementById('start-of-photography').value;
         let startDateStr = 'NoDate';
         if (startDateValue) {
@@ -1927,7 +3243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const shootDays = document.getElementById('total-shoot-days-display').textContent + "Days";
-        
+
         const numBlocks = parseInt(document.getElementById('num-shoot-blocks').value);
         let epsPerBlockStr = '';
         if (numBlocks === 1) {
@@ -1997,9 +3313,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     );
                 });
             }
-            
+
             icsString.push('END:VCALENDAR');
-            
+
             const blob = new Blob([icsString.join('\r\n')], { type: 'text/calendar' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
@@ -2020,7 +3336,7 @@ document.addEventListener('DOMContentLoaded', () => {
             [] // Spacer row
         ];
     }
-    
+
     function exportWaterfallToExcel() {
         if (masterTaskList.length === 0) { alert("Please generate a schedule first."); return; }
 
@@ -2048,7 +3364,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dateRows.push(new Date(currentDate));
             currentDate.setUTCDate(currentDate.getUTCDate() + 1);
         }
-        
+
         const aoa = getExportHeaderAOA();
         const headerRow = ['Date'];
         episodesData.forEach((ep, epId) => { headerRow.push(`EP ${epId + 1}`); });
@@ -2059,7 +3375,7 @@ document.addEventListener('DOMContentLoaded', () => {
             for (const hiatus of hiatuses) {
                 const start = new Date(hiatus.start + 'T12:00:00Z');
                 const end = new Date(hiatus.end + 'T12:00:00Z');
-                if (date >= start && date <= end) { 
+                if (date >= start && date <= end) {
                     isHiatus = true;
                     break;
                 }
@@ -2073,7 +3389,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const tasksOnThisDay = [];
                     const tasksForEp = masterTaskList.filter(t => t.epId === epId && t.isScheduled && t.info.visible);
                     const shootBlocks = getShootingBlocks().filter(b => b.episodes.includes(epId));
-                    
+
                     tasksForEp.forEach(task => {
                         if (date >= task.scheduledStartDate && date <= task.scheduledEndDate) {
                             tasksOnThisDay.push(task.info.name);
@@ -2089,7 +3405,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             aoa.push(row);
         });
-        
+
         aoa.push([]);
         aoa.push([AppDr_g0n]);
 
@@ -2124,9 +3440,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        
+
         doc.setFontSize(8);
-        doc.setTextColor(128, 128, 128); // Set color to grey
+        doc.setTextColor(128, 128, 128);
         doc.text(AppDr_g0n, 40, doc.lastAutoTable.finalY + 20);
 
         const filename = `${generateExportFilename()}_GRID`;
@@ -2172,7 +3488,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         episodesData.forEach((ep, epId) => {
             aoa.push([`EPISODE ${epId + 1}`]);
-            
+
             departments.forEach(dept => {
                 const row = [`EP ${epId + 1}`, dept];
                 const dateValues = Array(dateColumns.length).fill('');
@@ -2213,98 +3529,172 @@ document.addEventListener('DOMContentLoaded', () => {
 
             aoa.push([]);
         });
-        
+
         aoa.push([]);
         aoa.push([AppDr_g0n]);
 
         const ws = XLSX.utils.aoa_to_sheet(aoa);
-        
+
         const colWidths = [ { wch: 10 }, { wch: 25 } ];
         dateColumns.forEach(() => colWidths.push({ wch: 18 }));
         ws['!cols'] = colWidths;
-        
+
         const merges = [];
         let headerOffset = 5;
-        let currentRow = headerOffset; 
+        let currentRow = headerOffset;
         episodesData.forEach(() => {
             merges.push({ s: { r: currentRow, c: 0 }, e: { r: currentRow, c: header.length - 1 } });
-            currentRow += (departments.length + 1); 
-            currentRow++; 
+            currentRow += (departments.length + 1);
+            currentRow++;
         });
         ws['!merges'] = merges;
-        
+
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Timeline Export");
         const filename = `${generateExportFilename()}_TIMELINE`;
         XLSX.writeFile(wb, `${filename}.xlsx`);
     }
-    
-    function exportBudgetToExcel() {
-        const aoa = getExportHeaderAOA();
-        aoa.push(['Category', 'Description', 'Num', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Weeks', 'Weekly Rate', 'Fringe Type', 'Fringe Rate', 'Labor Total', 'Fringe Total', 'Line Total']);
 
-        document.querySelectorAll('.budget-category-table').forEach(table => {
-            const categoryName = table.querySelector('h2').textContent;
-            aoa.push([categoryName]); // Category Header
+    function saveSchedule() {
+        const cleanEpisodesData = episodesData.map(ep => ({
+            editors: ep.editors,
+            director: ep.director,
+            blockWrapDate: ep.blockWrapDate
+        }));
 
-            table.querySelectorAll('tbody tr').forEach(row => {
-                const id = row.dataset.id;
-                if (!id) return;
+        const state = {
+            inputs: {},
+            tasks: masterTaskList,
+            episodes: cleanEpisodesData,
+            hiatuses: hiatuses,
+            sixthDayWorkDates: sixthDayWorkDates,
+            budget: budgetData,
+            gridVisibleColumns: gridVisibleColumns
+        };
 
-                const rowData = [
-                    '', 
-                    document.getElementById(`budget-desc-${id}`)?.value,
-                    parseFloat(document.getElementById(`budget-num-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-prep-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-shoot-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-post-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-wrap-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-total-weeks-${id}`)?.textContent) || 0,
-                    parseFloat(document.getElementById(`budget-rate-${id}`)?.value) || 0,
-                    document.getElementById(`budget-fringeType-${id}`)?.value,
-                    parseFloat(document.getElementById(`budget-fringeRate-${id}`)?.value) || 0,
-                    parseFloat(document.getElementById(`budget-labor-total-${id}`)?.textContent.replace(/[^0-9.-]+/g,"")) || 0,
-                    parseFloat(document.getElementById(`budget-fringe-total-${id}`)?.textContent.replace(/[^0-9.-]+/g,"")) || 0,
-                    parseFloat(document.getElementById(`budget-line-total-${id}`)?.textContent.replace(/[^0-9.-]+/g,"")) || 0
-                ];
-                aoa.push(rowData);
-            });
-            
-            const subtotal = parseFloat(table.querySelector('.subtotal')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
-            aoa.push(['', '', '', '', '', '', '', '', '', '', '', '', 'Subtotal', subtotal]);
-            aoa.push([]); // Spacer
+        document.querySelectorAll('.controls input, .controls select, .schedule-variables input, .personnel-assignments input, .personnel-assignments select, .block-assignments input, .holiday-settings input, .holiday-settings select, #budget-view input, #budget-view select').forEach(el => {
+            if (el.type === 'checkbox') {
+                state.inputs[el.id] = el.checked;
+            } else if(el.type === 'select-multiple') {
+                state.inputs[el.id] = Array.from(el.selectedOptions).map(opt => opt.value);
+            }
+            else {
+                state.inputs[el.id] = el.value;
+            }
         });
-        
-        const grandTotal = parseFloat(document.getElementById('grand-total')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
-        aoa.push(['', '', '', '', '', '', '', '', '', '', '', '', 'GRAND TOTAL', grandTotal]);
-        aoa.push([]);
-        aoa.push([AppDr_g0n]);
 
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Budget");
-        const filename = `${generateExportFilename()}_BUDGET`;
-        XLSX.writeFile(wb, `${filename}.xlsx`);
+        const dataStr = JSON.stringify(state, (key, value) => {
+            if (key === 'predecessors' || key === 'originalPredecessors') {
+                 if (!value) return [];
+                 return value.filter(p => p && p.task).map(p => ({...p, task: p.task.id}));
+            }
+            return value;
+        }, 2);
+
+        const blob = new Blob([dataStr], {type: "application/json"});
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${generateExportFilename()}.json`;
+        link.click();
+        URL.revokeObjectURL(link.href);
     }
+    
+    function loadSchedule() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.readAsText(file, 'UTF-8');
+            reader.onload = readerEvent => {
+                try {
+                    const content = readerEvent.target.result;
+                    const state = JSON.parse(content);
 
-    // --- INITIALIZATION & MODALS ---
+                    hiatuses = state.hiatuses || [];
+                    sixthDayWorkDates = state.sixthDayWorkDates || [];
+                    budgetData = state.budget || {};
+
+                    for (const id in state.inputs) {
+                        const el = document.getElementById(id);
+                        if (el) {
+                             if (el.type === 'checkbox') el.checked = state.inputs[id];
+                             else if (el.type !== 'select-multiple') el.value = state.inputs[id];
+                        }
+                    }
+
+                    generatePersonnelFields();
+                    generateStudioCutFields();
+                    generateBlockFields();
+                    generateHolidaySelectors();
+
+                     for (const id in state.inputs) {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            if (el.type === 'select-multiple') {
+                                const values = state.inputs[id];
+                                Array.from(el.options).forEach(opt => {
+                                    opt.selected = values.includes(opt.value);
+                                });
+                            } else if(el.closest('.holiday-region-group')) {
+                                el.checked = state.inputs[id];
+                            }
+                        }
+                    }
+
+                    if (state.tasks) {
+                        state.tasks.forEach(task => {
+                            if (task.scheduledStartDate) task.scheduledStartDate = new Date(task.scheduledStartDate);
+                            if (task.scheduledEndDate) task.scheduledEndDate = new Date(task.scheduledEndDate);
+                            if (task.potentialStartDate) task.potentialStartDate = new Date(task.potentialStartDate);
+                        });
+                        masterTaskList = state.tasks;
+                        const taskMap = new Map(masterTaskList.map(t => [t.id, t]));
+
+                        masterTaskList.forEach(task => {
+                            if(task.predecessors) {
+                                task.predecessors = task.predecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
+                            }
+                             if(task.originalPredecessors) {
+                                task.originalPredecessors = task.originalPredecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
+                            }
+                        });
+                    }
+
+                    gridVisibleColumns = state.gridVisibleColumns || getCurrentAllGridColumns();
+
+                    updateWrapDate();
+                    renderHiatusList();
+                    renderSixthDayList();
+                    calculateAndRender();
+
+                } catch(err) {
+                    alert("Error loading file. It may be invalid or corrupted.");
+                    console.error("Load schedule error:", err);
+                }
+            }
+        }
+        input.click();
+    }
     
     function addFreeTask(epId, department, startDate, name, duration, assignee) {
-        if (!name || !name.trim()) return; 
+        if (!name || !name.trim()) return;
 
         const newTask = {
-            id: `ep${epId}-freetask-${crypto.randomUUID()}`,
+            id: `ep${epId}-freetask-${generateUUID()}`,
             epId: parseInt(epId),
-            info: { 
-                name: name.trim(), 
-                duration: duration, 
-                department: department.toUpperCase(), 
-                visible: true, 
-                priority: 100 
+            info: {
+                name: name.trim(),
+                duration: duration,
+                department: department.toUpperCase(),
+                visible: true,
+                priority: 100
             },
             predecessors: [],
-            originalPredecessors: [], 
-            resources: assignee ? [assignee] : [], 
+            originalPredecessors: [],
+            resources: assignee ? [assignee] : [],
             isScheduled: true,
             isManuallySet: true,
             scheduledStartDate: startDate,
@@ -2316,7 +3706,7 @@ document.addEventListener('DOMContentLoaded', () => {
             episodesData[epId].tasks = [];
         }
         episodesData[epId].tasks.push(newTask);
-        
+
         calculateAndRender();
     }
 
@@ -2352,7 +3742,7 @@ document.addEventListener('DOMContentLoaded', () => {
             departments.forEach(dept => {
                 departmentSelect.innerHTML += `<option value="${dept}">${dept}</option>`;
             });
-            
+
             modal.style.display = 'flex';
         };
 
@@ -2367,7 +3757,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('task-start-date').value = toYYYYMMDD(task.scheduledStartDate);
             document.getElementById('task-duration').value = task.info.duration;
             document.getElementById('task-assignee').value = task.resources.join(', ');
-            
+
             episodeSelect.innerHTML = '';
             for (let i = 0; i < episodesData.length; i++) {
                 episodeSelect.innerHTML += `<option value="${i}" ${i === task.epId ? 'selected' : ''}>EP ${i+1}</option>`;
@@ -2378,7 +3768,7 @@ document.addEventListener('DOMContentLoaded', () => {
             departments.forEach(dept => {
                 departmentSelect.innerHTML += `<option value="${dept}" ${dept === task.info.department ? 'selected' : ''}>${dept}</option>`;
             });
-            
+
             manageModal.style.display = 'none';
             modal.style.display = 'flex';
         };
@@ -2386,7 +3776,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const closeModal = () => {
             modal.style.display = 'none';
         };
-        
+
         const closeManageModal = () => {
             manageModal.style.display = 'none';
         }
@@ -2408,13 +3798,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const startDate = new Date(document.getElementById('task-start-date').value + 'T12:00:00Z');
             const duration = parseInt(document.getElementById('task-duration').value);
             const assignee = document.getElementById('task-assignee').value;
-            
+
             if (taskId) {
                 const taskIndex = masterTaskList.findIndex(t => t.id === taskId);
                 if (taskIndex > -1) {
                     const taskToUpdate = masterTaskList[taskIndex];
                     const originalEpId = taskToUpdate.epId;
-                    
+
                     taskToUpdate.info.name = taskName;
                     taskToUpdate.epId = epId;
                     taskToUpdate.info.department = department;
@@ -2422,7 +3812,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     taskToUpdate.info.duration = duration;
                     taskToUpdate.resources = assignee ? [assignee] : [];
                     taskToUpdate.scheduledEndDate = addBusinessDays(startDate, duration, department);
-                    
+
                     if (originalEpId !== epId) {
                         const originalEpTasks = episodesData[originalEpId].tasks;
                         const taskEpIndex = originalEpTasks.findIndex(t => t.id === taskId);
@@ -2431,19 +3821,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             episodesData[epId].tasks.push(taskToMove);
                         }
                     }
-                    calculateAndRender(); 
+                    calculateAndRender();
                 }
             } else {
                 addFreeTask(epId, department, startDate, taskName, duration, assignee);
             }
-            
+
             closeModal();
         });
-        
+
         deleteBtn.addEventListener('click', () => {
             const taskId = editTaskIdInput.value;
             if (!taskId) return;
-            
+
             const taskIndex = masterTaskList.findIndex(t => t.id === taskId);
             if (taskIndex > -1) {
                 const taskToDelete = masterTaskList[taskIndex];
@@ -2453,11 +3843,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     episodesData[taskToDelete.epId].tasks.splice(epTaskIndex, 1);
                 }
             }
-            
+
             calculateAndRender();
             closeModal();
         });
-        
+
         const manageBtn = document.getElementById('manage-events-btn');
         const manageModalCloseBtn = document.getElementById('manage-modal-close-btn');
         const customEventList = document.getElementById('custom-event-list');
@@ -2513,100 +3903,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    
-    function addWaterfallDragListeners() {
-        let draggedState = null;
-        let ghostElement = null;
-        let currentDropTarget = null;
 
-        const onMouseDown = (e) => {
-            if (e.button !== 0) return;
-            const bar = e.target.closest('.waterfall-task-bar');
-            if (!bar || bar.id.includes('block')) return; 
-
-            const parts = bar.id.split('__');
-            const taskId = parts[1];
-            const task = taskId ? masterTaskList.find(t => t.id === taskId) : null;
-            if (!task) return;
-
-            ghostElement = bar.cloneNode(true);
-            ghostElement.classList.add('ghost');
-            document.body.appendChild(ghostElement);
-            ghostElement.style.width = `${bar.offsetWidth}px`;
-            ghostElement.style.height = `${bar.offsetHeight}px`;
-            ghostElement.style.left = `${e.clientX - (bar.offsetWidth / 2)}px`;
-            ghostElement.style.top = `${e.clientY - 15}px`;
-            
-            draggedState = { taskObject: task, element: bar };
-            bar.classList.add('dragging');
-
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp, { once: true });
-        };
-
-        const onMouseMove = (e) => {
-            if (!draggedState) return;
-            
-            ghostElement.style.left = `${e.clientX - (ghostElement.offsetWidth / 2)}px`;
-            ghostElement.style.top = `${e.clientY - 15}px`;
-            
-            ghostElement.style.display = 'none';
-            const newDropTarget = document.elementFromPoint(e.clientX, e.clientY)?.closest('.waterfall-day-row');
-            ghostElement.style.display = '';
-
-            if (currentDropTarget && currentDropTarget !== newDropTarget) {
-                currentDropTarget.classList.remove('drop-target');
-            }
-            if (newDropTarget && newDropTarget.dataset.dateIso) {
-                newDropTarget.classList.add('drop-target');
-                currentDropTarget = newDropTarget;
-            } else {
-                currentDropTarget = null;
-            }
-        };
-
-        const onMouseUp = (e) => {
-            if (ghostElement) ghostElement.remove();
-            if (currentDropTarget) currentDropTarget.classList.remove('drop-target');
-            if (!draggedState) {
-                document.removeEventListener('mousemove', onMouseMove);
-                return;
-            };
-            
-            draggedState.element.classList.remove('dragging');
-            document.removeEventListener('mousemove', onMouseMove);
-            
-            if (currentDropTarget && currentDropTarget.dataset.dateIso) {
-                const newStartDate = new Date(currentDropTarget.dataset.dateIso);
-                const task = draggedState.taskObject;
-
-                if (unlinkToggle.checked) {
-                    task.manualStartDate = newStartDate;
-                    task.isManuallySet = false; 
-                    calculateAndRender();
-                } else {
-                    task.isManuallySet = true;
-                    task.predecessors = []; 
-                    task.scheduledStartDate = newStartDate;
-                    task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
-                    renderAllViews();
-                }
-            }
-            
-            draggedState = null;
-            currentDropTarget = null;
-            ghostElement = null;
-        };
-
-        document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
-    }
-
-    // --- HIATUS & 6TH DAY WORK FUNCTIONS ---
     function initializeDefaultHiatus() {
         const sopValue = document.getElementById('start-of-photography').value;
         const year = sopValue ? new Date(sopValue).getFullYear() : new Date().getFullYear();
         hiatuses = [{
-            id: crypto.randomUUID(),
+            id: generateUUID(),
             name: 'Holiday Hiatus',
             start: `${year}-12-22`,
             end: `${year + 1}-01-04`,
@@ -2632,7 +3934,7 @@ document.addEventListener('DOMContentLoaded', () => {
             container.appendChild(item);
         });
     }
-    
+
     function setupHiatusModal() {
         const modal = document.getElementById('hiatus-modal');
         const openBtn = document.getElementById('add-hiatus-btn');
@@ -2683,7 +3985,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const id = editIdInput.value;
             const newHiatus = {
-                id: id || crypto.randomUUID(),
+                id: id || generateUUID(),
                 name: document.getElementById('hiatus-name').value,
                 start: document.getElementById('hiatus-start-date').value,
                 end: document.getElementById('hiatus-end-date').value,
@@ -2704,7 +4006,7 @@ document.addEventListener('DOMContentLoaded', () => {
             calculateAndRender();
             closeModal();
         });
-        
+
         listContainer.addEventListener('click', (e) => {
             const target = e.target;
             const id = target.dataset.hiatusId;
@@ -2720,7 +4022,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    
+
     function renderSixthDayList() {
         const container = document.getElementById('sixth-day-list');
         container.innerHTML = '';
@@ -2732,7 +4034,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const item = document.createElement('div');
             item.className = 'custom-event-item';
             let scopeText = `For: ${auth.scope === 'all' ? 'Entire Schedule' : auth.scope === 'episode' ? `EP ${parseInt(auth.value) + 1}` : auth.value}`;
-            
+
             item.innerHTML = `
                 <div class="custom-event-info">
                     <strong>${auth.date}</strong><br>
@@ -2810,8 +4112,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('Please select a date.');
                 return;
             }
-            
-            const newAuth = { id: crypto.randomUUID(), date, scope, value };
+
+            const newAuth = { id: generateUUID(), date, scope, value };
             sixthDayWorkDates.push(newAuth);
             renderSixthDayList();
             calculateAndRender();
@@ -2837,7 +4139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const checkboxContainer = document.getElementById('grid-column-checkboxes');
 
         openBtn.addEventListener('click', () => {
-            checkboxContainer.innerHTML = ''; // Clear previous
+            checkboxContainer.innerHTML = '';
             const currentCols = getCurrentAllGridColumns();
             currentCols.forEach(colName => {
                 const isChecked = gridVisibleColumns.includes(colName);
@@ -2870,138 +4172,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 newVisibleColumns.push(checkbox.value);
             });
             gridVisibleColumns = newVisibleColumns;
-            renderGridView(); // Re-render the grid with new columns
+            renderGridView();
             closeModal();
         });
     }
-    
     // --- SAVE/LOAD FUNCTIONALITY ---
-    document.getElementById('save-schedule-btn').addEventListener('click', () => {
-        const cleanEpisodesData = episodesData.map(ep => ({
-            editors: ep.editors,
-            director: ep.director,
-            blockWrapDate: ep.blockWrapDate
-        }));
-        
-        const state = {
-            inputs: {},
-            tasks: masterTaskList,
-            episodes: cleanEpisodesData,
-            hiatuses: hiatuses,
-            sixthDayWorkDates: sixthDayWorkDates,
-            budget: budgetData,
-            gridVisibleColumns: gridVisibleColumns
-        };
-        
-        document.querySelectorAll('.controls input, .controls select, .schedule-variables input, .personnel-assignments input, .personnel-assignments select, .block-assignments input, .holiday-settings input, .holiday-settings select, #budget-view input, #budget-view select').forEach(el => {
-            if (el.type === 'checkbox') {
-                state.inputs[el.id] = el.checked;
-            } else if(el.type === 'select-multiple') {
-                state.inputs[el.id] = Array.from(el.selectedOptions).map(opt => opt.value);
-            }
-            else {
-                state.inputs[el.id] = el.value;
-            }
-        });
-
-        const dataStr = JSON.stringify(state, (key, value) => {
-            if (key === 'predecessors' || key === 'originalPredecessors') {
-                 if (!value) return [];
-                 return value.filter(p => p && p.task).map(p => ({...p, task: p.task.id}));
-            }
-            return value;
-        }, 2);
-
-        const blob = new Blob([dataStr], {type: "application/json"});
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${generateExportFilename()}.json`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-    });
-
-    document.getElementById('load-schedule-btn').addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.onchange = e => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.readAsText(file, 'UTF-8');
-            reader.onload = readerEvent => {
-                try {
-                    const content = readerEvent.target.result;
-                    const state = JSON.parse(content);
-
-                    hiatuses = state.hiatuses || [];
-                    sixthDayWorkDates = state.sixthDayWorkDates || [];
-                    budgetData = state.budget || {};
-
-                    for (const id in state.inputs) {
-                        const el = document.getElementById(id);
-                        if (el) {
-                             if (el.type === 'checkbox') el.checked = state.inputs[id];
-                             else if (el.type !== 'select-multiple') el.value = state.inputs[id];
-                        }
-                    }
-
-                    generatePersonnelFields();
-                    generateStudioCutFields();
-                    generateBlockFields();
-                    generateHolidaySelectors();
-                    
-                     for (const id in state.inputs) {
-                        const el = document.getElementById(id);
-                        if (el) {
-                            if (el.type === 'select-multiple') {
-                                const values = state.inputs[id];
-                                Array.from(el.options).forEach(opt => {
-                                    opt.selected = values.includes(opt.value);
-                                });
-                            } else if(el.closest('.holiday-region-group')) {
-                                el.checked = state.inputs[id];
-                            }
-                        }
-                    }
-
-                    if (state.tasks) {
-                        state.tasks.forEach(task => {
-                            if (task.scheduledStartDate) task.scheduledStartDate = new Date(task.scheduledStartDate);
-                            if (task.scheduledEndDate) task.scheduledEndDate = new Date(task.scheduledEndDate);
-                            if (task.potentialStartDate) task.potentialStartDate = new Date(task.potentialStartDate);
-                        });
-                        masterTaskList = state.tasks;
-                        const taskMap = new Map(masterTaskList.map(t => [t.id, t]));
-
-                        masterTaskList.forEach(task => {
-                            if(task.predecessors) {
-                                task.predecessors = task.predecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
-                            }
-                             if(task.originalPredecessors) {
-                                task.originalPredecessors = task.originalPredecessors.map(p => ({...p, task: taskMap.get(p.task)})).filter(p => p.task);
-                            }
-                        });
-                    }
-                    
-                    // Load column visibility, or set to default if not present
-                    gridVisibleColumns = state.gridVisibleColumns || getCurrentAllGridColumns();
-
-                    updateWrapDate();
-                    renderHiatusList();
-                    renderSixthDayList();
-                    calculateAndRender();
-
-                } catch(err) {
-                    alert("Error loading file. It may be invalid or corrupted.");
-                    console.error("Load schedule error:", err);
-                }
-            }
-        }
-        input.click();
-    });
+    document.getElementById('save-schedule-btn').addEventListener('click', saveSchedule);
+    document.getElementById('load-schedule-btn').addEventListener('click', loadSchedule);
     
-    // --- BUDGET FUNCTIONS ---
+    // Add event listener for the unlink toggle
+    function setupUnlinkToggleListener() {
+    const unlinkToggle = document.getElementById('unlink-on-manual-move');
+    if (unlinkToggle) {
+        unlinkToggle.addEventListener('change', handleLinkUnlinkToggleChange);
+    }
+    }
+    
     function updateBudgetFromSchedule() {
         if (!budgetData || Object.keys(budgetData).length === 0) return;
 
@@ -3030,7 +4216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const postProductionDays = diffBusinessDays(wrapOfPhotography, lastFinalDeliveryDate);
             globalPostWeeks = Math.ceil(postProductionDays / 5);
         }
-        
+
         const startOfPhotographyValue = document.getElementById('start-of-photography').value;
         if (!startOfPhotographyValue) return;
         const startOfPhotography = new Date(startOfPhotographyValue + 'T12:00:00Z');
@@ -3040,7 +4226,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const lastMandEDeliveryTasks = masterTaskList.filter(t => t.info.name === "M&E Delivery" && t.isScheduled);
         const lastMandEDeliveryDate = lastMandEDeliveryTasks.length > 0 ? new Date(Math.max(...lastMandEDeliveryTasks.map(t => t.scheduledEndDate.getTime()))) : null;
-        
+
         const lastVFXDueTasks = masterTaskList.filter(t => t.info.name === "VFX Due" && t.isScheduled);
         const lastVFXDueDate = lastVFXDueTasks.length > 0 ? new Date(Math.max(...lastVFXDueTasks.map(t => t.scheduledEndDate.getTime()))) : null;
 
@@ -3053,7 +4239,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 budgetData[category].forEach(item => {
                     let shoot = 0;
                     let post = 0;
-                    
+
                     if (item.desc === 'VFX Wrangler') {
                         shoot = globalShootWeeks;
                         post = 0;
@@ -3116,7 +4302,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                         const unworkedShootWeeks = unworkedShootDays / 5;
                                         shoot = globalShootWeeks - unworkedShootWeeks;
                                     } else {
-                                        shoot = 0; 
+                                        shoot = 0;
                                     }
                                     if (item.desc === 'Assistant Editor 1') {
                                         post = globalPostWeeks;
@@ -3173,7 +4359,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if(roomMatch) {
                         personKey = roomMatch[1] || roomMatch[2].replace(' Bay', '');
                     }
-                    
+
                     if (personKey && personnelWeeks[personKey]) {
                         item.shoot = personnelWeeks[personKey].shoot;
                         item.post = personnelWeeks[personKey].post;
@@ -3201,16 +4387,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (newEditorCount > currentEditorCount) {
             for (let i = currentEditorCount + 1; i <= newEditorCount; i++) {
-                const newEditor = { id: crypto.randomUUID(), desc: `Editor ${i}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 };
-                const newAsstEditor = { id: crypto.randomUUID(), desc: `Assistant Editor ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 };
-                
+                const newEditor = { id: generateUUID(), desc: `Editor ${i}`, num: 1, prep: 0, shoot: 0, post: 20, wrap: 1, rate: 5500, fringeType: 'percent', fringeRate: 40 };
+                const newAsstEditor = { id: generateUUID(), desc: `Assistant Editor ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 };
+
                 budgetData.Editorial.push(newEditor, newAsstEditor);
-                budgetData.Rooms.push({ id: crypto.randomUUID(), desc: `Editor Bay ${i}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-                budgetData.Rooms.push({ id: crypto.randomUUID(), desc: `Assistant Editor Bay ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Equipment Rentals'].push({ id: crypto.randomUUID(), desc: `AVID Rental (Editor ${i})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Equipment Rentals'].push({ id: crypto.randomUUID(), desc: `AVID Rental (Assistant Editor ${i})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-                budgetData['Box Rentals'].push({ id: crypto.randomUUID(), desc: `Box Rental (Editor ${i})`, num: newEditor.num, prep: newEditor.prep, shoot: newEditor.shoot, post: newEditor.post, wrap: newEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
-                budgetData['Box Rentals'].push({ id: crypto.randomUUID(), desc: `Box Rental (Assistant Editor ${i})`, num: newAsstEditor.num, prep: newAsstEditor.prep, shoot: newAsstEditor.shoot, post: newAsstEditor.post, wrap: newAsstEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
+                budgetData.Rooms.push({ id: generateUUID(), desc: `Editor Bay ${i}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+                budgetData.Rooms.push({ id: generateUUID(), desc: `Assistant Editor Bay ${i}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Equipment Rentals'].push({ id: generateUUID(), desc: `AVID Rental (Editor ${i})`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Equipment Rentals'].push({ id: generateUUID(), desc: `AVID Rental (Assistant Editor ${i})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
+                budgetData['Box Rentals'].push({ id: generateUUID(), desc: `Box Rental (Editor ${i})`, num: newEditor.num, prep: newEditor.prep, shoot: newEditor.shoot, post: newEditor.post, wrap: newEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
+                budgetData['Box Rentals'].push({ id: generateUUID(), desc: `Box Rental (Assistant Editor ${i})`, num: newAsstEditor.num, prep: newAsstEditor.prep, shoot: newAsstEditor.shoot, post: newAsstEditor.post, wrap: newAsstEditor.wrap, rate: 50, fringeType: 'capped', fringeRate: 500 });
             }
         }
 
@@ -3236,11 +4422,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderBudgetView() {
         const container = document.getElementById('budget-view');
         container.innerHTML = '';
-        
+
         for (const category in budgetData) {
             const table = document.createElement('table');
             table.className = 'budget-category-table';
-            
+
             let headerHTML, subtotalColspan;
             if (category === "Rooms" || category === "Equipment Rentals") {
                 headerHTML = `<tr><th style="width: 35%;">Description</th><th style="width: 8%;">Num</th><th style="width: 8%;">Prep</th><th style="width: 8%;">Shoot</th><th style="width: 8%;">Post</th><th style="width: 8%;">Wrap</th><th style="width: 10%;">Total Wks</th><th style="width: 10%;">Rate</th><th style="width: 12%;">Total</th><th style="width: 3%;"></th></tr>`;
@@ -3254,7 +4440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             let tableHTML = `<thead><tr><th colspan="${subtotalColspan + 2}"><h2>${category}</h2></th></tr>${headerHTML}</thead><tbody>`;
-            
+
             budgetData[category].forEach(item => {
                 tableHTML += `<tr data-id="${item.id}">
                     <td><input type="text" id="budget-desc-${item.id}" value="${item.desc}" class="budget-input"></td>
@@ -3311,11 +4497,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const grandTotalEl = document.createElement('div');
         grandTotalEl.innerHTML = `<h2>Grand Total: <span id="grand-total" class="grand-total">$0.00</span></h2>`;
         container.appendChild(grandTotalEl);
-        
+
         addBudgetEventListeners();
         calculateBudgetTotals();
     }
-    
+
     function calculateBudgetTotals() {
         let grandTotal = 0;
         const currencyFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -3335,7 +4521,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const post = parseFloat(document.getElementById(`budget-post-${id}`).value) || 0;
                 const wrap = parseFloat(document.getElementById(`budget-wrap-${id}`).value) || 0;
                 const rate = parseFloat(document.getElementById(`budget-rate-${id}`).value) || 0;
-                
+
                 const totalWeeks = prep + shoot + post + wrap;
                 const laborTotal = num * totalWeeks * rate;
                 let fringeTotal = 0;
@@ -3355,7 +4541,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         fringeTotal = Math.min(laborTotal, cap * num);
                     }
                     lineTotal = laborTotal + fringeTotal;
-                    
+
                     if(categoryName === "Box Rentals") {
                          lineTotal = fringeType === 'capped' ? fringeTotal : laborTotal;
                     }
@@ -3364,10 +4550,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if(laborTotalEl) laborTotalEl.textContent = currencyFormat.format(laborTotal);
                     if(fringeTotalEl) fringeTotalEl.textContent = currencyFormat.format(fringeTotal);
                 }
-                
+
                 document.getElementById(`budget-total-weeks-${id}`).textContent = totalWeeks.toFixed(2);
                 document.getElementById(`budget-line-total-${id}`).textContent = currencyFormat.format(lineTotal);
-                
+
                 categorySubtotal += lineTotal;
             });
 
@@ -3396,7 +4582,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', (e) => {
                 const category = e.target.dataset.category;
                 budgetData[category].push({
-                    id: crypto.randomUUID(), desc: 'New Item', num: 1, prep: 0, shoot: 0, post: 0, wrap: 0, rate: 0, fringeType: 'percent', fringeRate: 25
+                    id: generateUUID(), desc: 'New Item', num: 1, prep: 0, shoot: 0, post: 0, wrap: 0, rate: 0, fringeType: 'percent', fringeRate: 25
                 });
                 renderBudgetView();
             });
@@ -3411,8 +4597,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-
-    // --- INITIALIZATION ---
     function initializeApp() {
         setupCollapsibleSections();
         generateHolidaySelectors();
@@ -3423,7 +4607,26 @@ document.addEventListener('DOMContentLoaded', () => {
         setupColumnConfigModal();
         loadDefaults('hour-long');
         document.getElementById('app-Dr_g0n-container').innerHTML = AppDr_g0n;
+        
         setupAllEventListeners();
+        setupEnhancedInputListeners();
+        setupUnlinkToggleListener(); // ADD THIS LINE
+        
+        // Explicit handlers for the problematic checkboxes
+        document.getElementById('producers-cuts-overlap').addEventListener('change', (e) => {
+            setLastChangedInput(e.target.id);
+            handleInputChange(e.target);
+        });
+        
+        document.getElementById('producers-cuts-pre-wrap').addEventListener('change', (e) => {
+            setLastChangedInput(e.target.id);
+            handleInputChange(e.target);
+        });
+        
+        document.getElementById('toggle-sequential-lock').addEventListener('change', (e) => {
+            setLastChangedInput(e.target.id);
+            handleInputChange(e.target);
+        });
     }
 
     initializeApp();
