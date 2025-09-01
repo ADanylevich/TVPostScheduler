@@ -147,7 +147,6 @@ function restoreManuallySetTasks(manualTasksData) {
     });
 }
 
-// Enhanced calculateScheduleWithConflictDetection to handle restored tasks better
 function calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks) {
     // Ensure manually set tasks maintain their scheduled state
     manuallySetTasks.forEach(task => {
@@ -179,18 +178,6 @@ function setLastChangedInput(inputId) {
     lastChangedInputId = inputId;
 }
 
-// Enhanced schedule calculation with conflict detection
-function calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks) {
-    const tempSchedule = calculateIdealSchedule();
-    const conflicts = detectAdvancedConflicts(tempSchedule, manuallySetTasks);
-    
-    if (conflicts.length > 0 && !conflictResolutionMode) {
-        showConflictModal(conflicts);
-    } else {
-        calculateSchedule();
-        calculateAndRender();
-    }
-}
 
 // Calculate ideal schedule without manual interventions
 function calculateIdealSchedule() {
@@ -925,10 +912,21 @@ function checkForManualTaskConflicts(originalManualTasksState) {
         fullRegenerationWithConflictDetection();
     }, 300);
 
-    // Full regeneration with conflict detection
     function fullRegenerationWithConflictDetection() {
         const customTasks = masterTaskList.filter(t => t.id.includes('freetask'));
         const manuallySetTasks = masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask'));
+        
+        // Store complete state of manual tasks
+        const manualTaskData = manuallySetTasks.map(task => ({
+            id: task.id,
+            scheduledStartDate: task.scheduledStartDate ? new Date(task.scheduledStartDate) : null,
+            scheduledEndDate: task.scheduledEndDate ? new Date(task.scheduledEndDate) : null,
+            isManuallySet: task.isManuallySet,
+            isScheduled: task.isScheduled,
+            originalPredecessors: task.originalPredecessors ? [...task.originalPredecessors] : null,
+            epId: task.epId,
+            info: {...task.info}
+        }));
         
         if (manuallySetTasks.length > 0) {
             // Store current state for comparison
@@ -940,33 +938,34 @@ function checkForManualTaskConflicts(originalManualTasksState) {
             }));
             
             masterTaskList = [];
-            masterTaskList.push(...customTasks, ...manuallySetTasks);
+            masterTaskList.push(...customTasks);
             
             generateScheduleFromScratch();
+            
+            // Restore manual tasks after regeneration
+            manualTaskData.forEach(manualData => {
+                const regeneratedTask = masterTaskList.find(t => 
+                    t.epId === manualData.epId && 
+                    t.info.name === manualData.info.name
+                );
+                
+                if (regeneratedTask) {
+                    regeneratedTask.scheduledStartDate = manualData.scheduledStartDate;
+                    regeneratedTask.scheduledEndDate = manualData.scheduledEndDate;
+                    regeneratedTask.isManuallySet = true;
+                    regeneratedTask.isScheduled = true;
+                    regeneratedTask.originalPredecessors = manualData.originalPredecessors;
+                    regeneratedTask.predecessors = [];
+                }
+            });
+            
             calculateScheduleWithConflictDetection(previousSchedule, manuallySetTasks);
         } else {
             // No manual tasks, proceed normally
             masterTaskList = [];
-            masterTaskList.push(...customTasks, ...manuallySetTasks);
+            masterTaskList.push(...customTasks);
             
             generateScheduleFromScratch();
-            calculateAndRender();
-        }
-    }
-
-    // Enhanced schedule calculation with smart conflict detection
-    function calculateScheduleWithSmartConflictDetection(previousSchedule, manuallySetTasks) {
-        // First, calculate what the schedule would be without manual anchors
-        const tempSchedule = calculateIdealSchedule();
-        
-        // Detect conflicts using the enhanced detection logic
-        const conflicts = detectAdvancedConflicts(tempSchedule, manuallySetTasks);
-        
-        if (conflicts.length > 0 && !conflictResolutionMode) {
-            showConflictModal(conflicts);
-        } else {
-            // No conflicts detected or we're in resolution mode - proceed normally
-            calculateSchedule();
             calculateAndRender();
         }
     }
@@ -1185,6 +1184,7 @@ Would you like to:
                 // Restore original predecessors
                 if (task.originalPredecessors) {
                     task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                    delete task.originalPredecessors; // Clean up after restoration
                 }
             });
             calculateAndRender();
@@ -1808,13 +1808,24 @@ Would you like to:
     }
 
     // Enhanced calculateSchedule function to better handle manually set tasks during global changes
-function calculateSchedule() {
+    function calculateSchedule() {
     const producersCutsOverlap = document.getElementById('producers-cuts-overlap').checked;
     const producersCutsPreWrap = document.getElementById('producers-cuts-pre-wrap').checked;
 
     // Store manually set tasks and validate their state
     const manuallySetTasks = masterTaskList.filter(t => t.isManuallySet);
     const manualTaskRelationships = new Map();
+    
+    // Store manual task states to prevent cascade corruption
+    const manualTaskStates = new Map();
+    masterTaskList.filter(t => t.isManuallySet && !t.id.includes('freetask')).forEach(task => {
+    manualTaskStates.set(task.id, {
+        startDate: task.scheduledStartDate ? new Date(task.scheduledStartDate) : null,
+        endDate: task.scheduledEndDate ? new Date(task.scheduledEndDate) : null,
+        isScheduled: task.isScheduled,
+        originalPredecessors: task.originalPredecessors ? [...task.originalPredecessors] : null
+        });
+    });
 
     manuallySetTasks.forEach(task => {
         // Ensure manually set tasks maintain their dates and scheduled state
@@ -2029,6 +2040,22 @@ task.potentialStartDate = new Date(baseStart);
     
     // Final validation that manual anchors are still respected
     validateManualAnchors(manuallySetTasks);
+    // Restore manual task states to ensure they maintain their positions
+manualTaskStates.forEach((state, taskId) => {
+    const task = masterTaskList.find(t => t.id === taskId);
+    if (task && state.startDate) {
+        task.scheduledStartDate = state.startDate;
+        task.scheduledEndDate = state.endDate;
+        task.isScheduled = state.isScheduled;
+        task.isManuallySet = true;
+        if (state.originalPredecessors) {
+            task.originalPredecessors = state.originalPredecessors;
+        }
+        // Ensure predecessors are cleared for manually set tasks
+        task.predecessors = [];
+    }
+});
+
 }
 
     function calculateReleaseDates() {
@@ -2980,47 +3007,78 @@ function addManualDragListeners() {
             };
             
             if (isLinkedMode) {
-                // LINKED mode - completely anchor the task
+                // IMPROVED LINKED mode - smarter task linking with cascade prevention
+                const timeShift = newStartDate.getTime() - task.scheduledStartDate.getTime();
+                
+                // Update the dragged task
                 task.isManuallySet = true;
                 task.isScheduled = true;
-                task.predecessors = [];
                 task.scheduledStartDate = newStartDate;
                 task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+                task.originalPredecessors = task.originalPredecessors || [...task.predecessors];
+                task.predecessors = [];
                 
                 // Clean up any existing manual start date
                 if (task.manualStartDate) {
                     delete task.manualStartDate;
                 }
                 
-                // Check for immediate conflicts with other manually set tasks
-                const immediateConflicts = checkImmediateConflicts(task);
-                if (immediateConflicts.length > 0) {
-                    if (confirm(`This move conflicts with other manually positioned tasks. Proceed anyway?`)) {
-                        renderAllViews();
-                    } else {
-                        // Revert the change
-                        Object.assign(task, originalState);
-                        renderAllViews();
-                    }
-                } else {
-                    renderAllViews();
+                // Smart linking logic - only affect related tasks in same or later episodes
+                const linkedTasks = [];
+                
+                if (task.info.name === "Producer Notes") {
+                    const dcv2 = masterTaskList.find(t => 
+                        t.epId === task.epId && 
+                        t.info.name === "Director's Cut v2" &&
+                        !t.isManuallySet &&
+                        t.isScheduled
+                    );
+                    if (dcv2) linkedTasks.push(dcv2);
                 }
+                
+                if (task.info.name === "Director's Cut v2") {
+                    // Only link subsequent tasks in SAME episode to prevent cascade
+                    const sameEpisodeTasks = masterTaskList.filter(t => 
+                        t.epId === task.epId &&
+                        t.isScheduled &&
+                        !t.isManuallySet &&
+                        t.scheduledStartDate >= task.scheduledStartDate &&
+                        (t.info.name === "Producer's Cut" || t.info.name.includes("Cut") || t.info.name === "Notes")
+                    );
+                    linkedTasks.push(...sameEpisodeTasks);
+                }
+                
+                // Apply time shifts to linked tasks with boundary protection
+                linkedTasks.forEach(linkedTask => {
+                    const newStart = new Date(linkedTask.scheduledStartDate.getTime() + timeShift);
+                    const newEnd = addBusinessDays(newStart, linkedTask.info.duration, linkedTask.info.department, linkedTask.epId, linkedTask.resources);
+                    
+                    linkedTask.scheduledStartDate = newStart;
+                    linkedTask.scheduledEndDate = newEnd;
+                    linkedTask.isManuallySet = true;
+                    linkedTask.originalPredecessors = linkedTask.originalPredecessors || [...linkedTask.predecessors];
+                    linkedTask.predecessors = [];
+                });
+                
+                renderAllViews();
+            
             } else {
-                // UNLINKED mode - set manual start date but keep in scheduling system
-                task.manualStartDate = newStartDate;
-                task.isManuallySet = false;
-                
-                // Clean up any previous manual positioning
-                if (originalState.isManuallySet) {
-                    task.isScheduled = false;
-                    // Restore original predecessors if it was previously manually set
-                    if (task.originalPredecessors) {
-                        task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
-                    }
+            // UNLINKED mode - set manual start date but keep in scheduling system
+            task.manualStartDate = newStartDate;
+            task.isManuallySet = false;
+            
+            // Clean up any previous manual positioning
+            if (originalState.isManuallySet) {
+                task.isScheduled = false;
+                // Restore original predecessors if it was previously manually set
+                if (task.originalPredecessors) {
+                    task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                    delete task.originalPredecessors; // Clean up after restoration
                 }
-                
-                calculateAndRender();
             }
+            
+            calculateAndRender();
+             }
         }
         draggedState = null;
         ghostElement = null;
@@ -3112,54 +3170,86 @@ function addWaterfallDragListeners() {
             };
             
             if (isLinkedMode) {
-                // LINKED mode - completely anchor the task
+                // IMPROVED LINKED mode - smarter task linking with cascade prevention
+                const timeShift = newStartDate.getTime() - task.scheduledStartDate.getTime();
+                
+                // Update the dragged task
                 task.isManuallySet = true;
                 task.isScheduled = true;
-                task.predecessors = [];
                 task.scheduledStartDate = newStartDate;
                 task.scheduledEndDate = addBusinessDays(newStartDate, task.info.duration, task.info.department, task.epId, task.resources);
+                task.originalPredecessors = task.originalPredecessors || [...task.predecessors];
+                task.predecessors = [];
                 
                 // Clean up any existing manual start date
                 if (task.manualStartDate) {
                     delete task.manualStartDate;
                 }
                 
-                // Check for immediate conflicts with other manually set tasks
-                const immediateConflicts = checkImmediateConflicts(task);
-                if (immediateConflicts.length > 0) {
-                    if (confirm(`This move conflicts with other manually positioned tasks. Proceed anyway?`)) {
-                        renderAllViews();
-                    } else {
-                        // Revert the change
-                        Object.assign(task, originalState);
-                        renderAllViews();
-                    }
-                } else {
-                    renderAllViews();
+                // Smart linking logic - only affect related tasks in same or later episodes
+                const linkedTasks = [];
+                
+                if (task.info.name === "Producer Notes") {
+                    const dcv2 = masterTaskList.find(t => 
+                        t.epId === task.epId && 
+                        t.info.name === "Director's Cut v2" &&
+                        !t.isManuallySet &&
+                        t.isScheduled
+                    );
+                    if (dcv2) linkedTasks.push(dcv2);
                 }
+                
+                if (task.info.name === "Director's Cut v2") {
+                    // Only link subsequent tasks in SAME episode to prevent cascade
+                    const sameEpisodeTasks = masterTaskList.filter(t => 
+                        t.epId === task.epId &&
+                        t.isScheduled &&
+                        !t.isManuallySet &&
+                        t.scheduledStartDate >= task.scheduledStartDate &&
+                        (t.info.name === "Producer's Cut" || t.info.name.includes("Cut") || t.info.name === "Notes")
+                    );
+                    linkedTasks.push(...sameEpisodeTasks);
+                }
+                
+                // Apply time shifts to linked tasks with boundary protection
+                linkedTasks.forEach(linkedTask => {
+                    const newStart = new Date(linkedTask.scheduledStartDate.getTime() + timeShift);
+                    const newEnd = addBusinessDays(newStart, linkedTask.info.duration, linkedTask.info.department, linkedTask.epId, linkedTask.resources);
+                    
+                    linkedTask.scheduledStartDate = newStart;
+                    linkedTask.scheduledEndDate = newEnd;
+                    linkedTask.isManuallySet = true;
+                    linkedTask.originalPredecessors = linkedTask.originalPredecessors || [...linkedTask.predecessors];
+                    linkedTask.predecessors = [];
+                });
+                
+                renderAllViews();
+
             } else {
-                // UNLINKED mode - set manual start date but keep in scheduling system
-                task.manualStartDate = newStartDate;
-                task.isManuallySet = false;
-                
-                // Clean up any previous manual positioning
-                if (originalState.isManuallySet) {
-                    task.isScheduled = false;
-                    // Restore original predecessors if it was previously manually set
-                    if (task.originalPredecessors) {
-                        task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
-                    }
+            // UNLINKED mode - set manual start date but keep in scheduling system
+            task.manualStartDate = newStartDate;
+            task.isManuallySet = false;
+            
+            // Clean up any previous manual positioning
+            if (originalState.isManuallySet) {
+                task.isScheduled = false;
+                // Restore original predecessors if it was previously manually set
+                if (task.originalPredecessors) {
+                    task.predecessors = task.originalPredecessors.map(p => ({ ...p }));
+                    delete task.originalPredecessors; // Clean up after restoration
                 }
-                
-                calculateAndRender();
             }
+            
+            calculateAndRender();
         }
-        draggedState = null;
-        ghostElement = null;
-    };
+    }  // This closes the if (currentDropTarget && currentDropTarget.dataset.dateIso)
     
-    document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
-}
+    draggedState = null;
+    ghostElement = null;
+};  // This closes the onMouseUp function
+
+document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
+}  // This closes addWaterfallDragListeners
 
     function setupTabControls() {
         const tabButtons = document.querySelectorAll('.tab-button');
@@ -3279,7 +3369,7 @@ function addWaterfallDragListeners() {
             let icsString = [
                 'BEGIN:VCALENDAR',
                 'VERSION:2.0',
-                'PRODID:-//GeminiScheduler//Beta v2.31//EN',
+                'PRODID:-//GeminiScheduler//Beta v3.1//EN',
                 `X-WR-CALNAME:${document.getElementById('show-code').value} - ${dept}`
             ];
 
@@ -4630,4 +4720,5 @@ function addWaterfallDragListeners() {
     }
 
     initializeApp();
+    console.log("Script loaded successfully");
 });
