@@ -1,4 +1,6 @@
 {
-  "firebase_hosting": {},
+  "firebase_hosting": {
+    "deploymentHostingUrl": "https://tvpostproductionscheduler.web.app"
+  },
   "cloud_run_deploy": {}
 }
