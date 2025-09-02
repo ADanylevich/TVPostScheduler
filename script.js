@@ -3688,7 +3688,442 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         link.click();
         URL.revokeObjectURL(link.href);
     }
+    function exportBudgetToExcel() {
+        if (typeof XLSX === 'undefined') {
+            alert('Excel export library not loaded. Please refresh and try again.');
+            return;
+        }
+        
+        const wb = XLSX.utils.book_new();
+        
+        // Build comprehensive labor mapping with multiple lookup keys
+        const laborMapping = {};
+        const laborDescToRow = {};
+        let laborStartRow = 2;
+        
+        if (budgetData['Labor']) {
+            budgetData['Labor'].forEach((item, index) => {
+                const excelRow = laborStartRow + index;
+                
+                // Store by ID
+                laborMapping[item.id] = {
+                    row: excelRow,
+                    desc: item.desc,
+                    num: item.num,
+                    prep: item.prep,
+                    shoot: item.shoot,
+                    post: item.post,
+                    wrap: item.wrap
+                };
+                
+                // Store by description variations for fallback matching
+                const descKey = item.desc.toLowerCase().trim();
+                laborDescToRow[descKey] = excelRow;
+                
+                // Also store without common suffixes for easier matching
+                const baseName = descKey
+                    .replace(/\s*\(.*\)/, '') // Remove parenthetical
+                    .replace(/\s*-.*/, ''); // Remove dash suffixes
+                if (baseName !== descKey) {
+                    laborDescToRow[baseName] = excelRow;
+                }
+                
+                // Store common abbreviations
+                if (descKey.includes('assistant')) {
+                    laborDescToRow[descKey.replace('assistant', 'asst')] = excelRow;
+                    laborDescToRow[descKey.replace('assistant', 'ast')] = excelRow;
+                }
+                if (descKey.includes('producer')) {
+                    laborDescToRow[descKey.replace('producer', 'prod')] = excelRow;
+                }
+                if (descKey.includes('coordinator')) {
+                    laborDescToRow[descKey.replace('coordinator', 'coord')] = excelRow;
+                }
+            });
+        }
+        
+        // Helper function to find labor reference with comprehensive matching
+        const findLaborReference = (item) => {
+            // First check laborRef if it exists
+            if (item.laborRef && laborMapping[item.laborRef]) {
+                return laborMapping[item.laborRef];
+            }
+            
+            const itemDesc = (item.desc || '').toLowerCase().trim();
+            
+            // Direct description match
+            if (laborDescToRow[itemDesc]) {
+                return {
+                    row: laborDescToRow[itemDesc],
+                    desc: itemDesc
+                };
+            }
+            
+            // Pattern matching for rooms/equipment/box rentals
+            const patterns = [
+                { pattern: /^(.+?)\s+room$/i, captureGroup: 1 },
+                { pattern: /^(.+?)\s+equipment$/i, captureGroup: 1 },
+                { pattern: /^(.+?)\s+box\s+rental$/i, captureGroup: 1 },
+                { pattern: /^(.+?)'s\s+room$/i, captureGroup: 1 },
+                { pattern: /^(.+?)'s\s+equipment$/i, captureGroup: 1 },
+                { pattern: /^(.+?)'s\s+box\s+rental$/i, captureGroup: 1 },
+                { pattern: /^room\s+for\s+(.+?)$/i, captureGroup: 1 },
+                { pattern: /^equipment\s+for\s+(.+?)$/i, captureGroup: 1 },
+                { pattern: /^box\s+rental\s+for\s+(.+?)$/i, captureGroup: 1 }
+            ];
+            
+            for (let pattern of patterns) {
+                const match = itemDesc.match(pattern.pattern);
+                if (match && match[pattern.captureGroup]) {
+                    const baseName = match[pattern.captureGroup].toLowerCase().trim();
+                    if (laborDescToRow[baseName]) {
+                        return {
+                            row: laborDescToRow[baseName],
+                            desc: baseName
+                        };
+                    }
+                }
+            }
+            
+            // Fuzzy matching - find partial matches
+            for (let laborDesc in laborDescToRow) {
+                // Check if item description contains labor description or vice versa
+                if (itemDesc.includes(laborDesc) || laborDesc.includes(itemDesc)) {
+                    return {
+                        row: laborDescToRow[laborDesc],
+                        desc: laborDesc
+                    };
+                }
+                
+                // Check for common word overlap
+                const itemWords = itemDesc.split(/\s+/);
+                const laborWords = laborDesc.split(/\s+/);
+                const commonWords = itemWords.filter(word => 
+                    laborWords.includes(word) && word.length > 3
+                );
+                if (commonWords.length >= 2) {
+                    return {
+                        row: laborDescToRow[laborDesc],
+                        desc: laborDesc
+                    };
+                }
+            }
+            
+            return null;
+        };
+        
+        // Create summary sheet
+        const summaryData = [
+            ['Budget Export - ' + document.getElementById('show-name').value],
+            ['Generated: ' + new Date().toLocaleDateString()],
+            ['Created with TV Post Production Scheduler'],
+            [AppDr_g0n],
+            [''],
+            ['Category', 'Subtotal']
+        ];
+        
+        let summaryRow = 7;
+        const categoryRows = {};
+        
+        Object.keys(budgetData).forEach(category => {
+            categoryRows[category] = summaryRow;
+            summaryData.push([category, '']);
+            summaryRow++;
+        });
+        
+        summaryData.push(['', '']);
+        summaryData.push(['GRAND TOTAL', { t: 'n', f: `SUM(B7:B${summaryRow - 1})` }]);
+        
+        const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+        XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+        
+        // Process each category
+        Object.keys(budgetData).forEach(category => {
+            const categoryData = [];
+            let currentRow = 1;
+            
+            // Add headers based on category type
+            if (category === "Labor" || category === "Fabrication") {
+                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Type', 'Fringe Rate', 'Labor Total', 'Fringe Total', 'Total']);
+            } else if (category === "Rooms" || category === "Equipment Rentals") {
+                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Total', 'Labor Link']);
+            } else if (category === "Box Rentals") {
+                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Capped', 'Fringe Cap', 'Total', 'Labor Link']);
+            }
+            currentRow++;
+            
+            // Process each item in the category
+            budgetData[category].forEach((item, index) => {
+                const rowNum = currentRow + index;
+                
+                if (category === "Labor" || category === "Fabrication") {
+                    categoryData.push([
+                        item.desc || '',
+                        item.num || 0,
+                        item.prep || 0,
+                        item.shoot || 0,
+                        item.post || 0,
+                        item.wrap || 0,
+                        { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                        item.rate || 0,
+                        item.fringeType || 'percent',
+                        item.fringeRate || 0,
+                        { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                        { t: 'n', f: `IF(I${rowNum}="percent",K${rowNum}*J${rowNum}/100,IF(I${rowNum}="flat",J${rowNum}*G${rowNum}*B${rowNum},0))` },
+                        { t: 'n', f: `K${rowNum}+L${rowNum}` }
+                    ]);
+                } else if (category === "Rooms" || category === "Equipment Rentals") {
+                    const laborLink = findLaborReference(item);
+                    if (laborLink) {
+                        categoryData.push([
+                            item.desc || '',
+                            { t: 'n', f: `Labor!B${laborLink.row}` },
+                            { t: 'n', f: `Labor!C${laborLink.row}` },
+                            { t: 'n', f: `Labor!D${laborLink.row}` },
+                            { t: 'n', f: `Labor!E${laborLink.row}` },
+                            { t: 'n', f: `Labor!F${laborLink.row}` },
+                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                            item.rate || 0,
+                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                            laborLink.desc || ''
+                        ]);
+                    } else {
+                        categoryData.push([
+                            item.desc || '',
+                            item.num || 0,
+                            item.prep || 0,
+                            item.shoot || 0,
+                            item.post || 0,
+                            item.wrap || 0,
+                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                            item.rate || 0,
+                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                            ''
+                        ]);
+                    }
+                } else if (category === "Box Rentals") {
+                    const laborLink = findLaborReference(item);
+                    if (laborLink) {
+                        categoryData.push([
+                            item.desc || '',
+                            { t: 'n', f: `Labor!B${laborLink.row}` },
+                            { t: 'n', f: `Labor!C${laborLink.row}` },
+                            { t: 'n', f: `Labor!D${laborLink.row}` },
+                            { t: 'n', f: `Labor!E${laborLink.row}` },
+                            { t: 'n', f: `Labor!F${laborLink.row}` },
+                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                            item.rate || 0,
+                            item.fringeType === 'capped' ? 'Yes' : 'No',
+                            item.fringeRate || 0,
+                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
+                            laborLink.desc || ''
+                        ]);
+                    } else {
+                        categoryData.push([
+                            item.desc || '',
+                            item.num || 0,
+                            item.prep || 0,
+                            item.shoot || 0,
+                            item.post || 0,
+                            item.wrap || 0,
+                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                            item.rate || 0,
+                            item.fringeType === 'capped' ? 'Yes' : 'No',
+                            item.fringeRate || 0,
+                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
+                            ''
+                        ]);
+                    }
+                }
+            });
+            
+            // Add subtotal row
+            const dataEndRow = currentRow + budgetData[category].length - 1;
+            const subtotalRow = new Array(categoryData[0].length - 2).fill('');
+            
+            let totalColumn;
+            if (category === "Labor" || category === "Fabrication") {
+                totalColumn = 'M';
+            } else if (category === "Rooms" || category === "Equipment Rentals") {
+                totalColumn = 'I';
+            } else if (category === "Box Rentals") {
+                totalColumn = 'K';
+            }
+            
+            subtotalRow.push('Subtotal');
+            subtotalRow.push({ t: 'n', f: `SUM(${totalColumn}2:${totalColumn}${dataEndRow})` });
+            categoryData.push(subtotalRow);
+            
+            const categorySheet = XLSX.utils.aoa_to_sheet(categoryData);
+            const sheetName = category.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '');
+            XLSX.utils.book_append_sheet(wb, categorySheet, sheetName);
+            
+            // Update summary reference
+            const subtotalRowNum = dataEndRow + 1;
+            summarySheet['B' + categoryRows[category]] = { t: 'n', f: `'${sheetName}'!${totalColumn}${subtotalRowNum}` };
+        });
+        
+        const showName = document.getElementById('show-name').value || 'Schedule';
+        const showCode = document.getElementById('show-code').value || 'SHOW';
+        const filename = `${showCode}_Budget_${new Date().toISOString().split('T')[0]}.xlsx`;
+        
+        XLSX.writeFile(wb, filename);
+    }
     
+    // Helper function for calculating category totals in the web app
+    function calculateCategoryTotal(category) {
+        let total = 0;
+        budgetData[category].forEach(item => {
+            const totalWeeks = (item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0);
+            const laborTotal = (item.num || 0) * totalWeeks * (item.rate || 0);
+            
+            let fringeTotal = 0;
+            if (category !== "Rooms" && category !== "Equipment Rentals") {
+                if (item.fringeType === 'percent') {
+                    fringeTotal = laborTotal * ((item.fringeRate || 0) / 100);
+                } else if (item.fringeType === 'flat') {
+                    fringeTotal = (item.fringeRate || 0) * totalWeeks * (item.num || 0);
+                } else if (item.fringeType === 'capped' && category === "Box Rentals") {
+                    fringeTotal = Math.min(laborTotal * 0.25, item.fringeRate || 0);
+                }
+            }
+            
+            total += laborTotal + fringeTotal;
+        });
+        return total;
+    }
+    function showAddLaborModal() {
+        const modal = document.getElementById('add-labor-modal');
+        if (!modal) {
+            console.error('Add labor modal not found in DOM');
+            return;
+        }
+        
+        modal.style.display = 'flex';
+        
+        // Clear all previous values and reset to defaults
+        document.getElementById('new-labor-desc').value = '';
+        document.getElementById('new-labor-qty').value = '1';
+        document.getElementById('new-labor-rate').value = '0';
+        document.getElementById('new-labor-prep').value = '0';
+        document.getElementById('new-labor-shoot').value = '0';
+        document.getElementById('new-labor-post').value = '0';
+        document.getElementById('new-labor-wrap').value = '0';
+        document.getElementById('new-labor-fringe-type').value = 'percent';
+        document.getElementById('new-labor-fringe-rate').value = '25';
+        document.getElementById('create-room').checked = true;
+        document.getElementById('create-equipment').checked = true;
+        document.getElementById('create-box-rental').checked = true;
+        
+        // Confirm button handler
+        document.getElementById('confirm-add-labor').onclick = () => {
+            // Gather all the input values
+            const desc = document.getElementById('new-labor-desc').value.trim() || 'New Crew Member';
+            const qty = parseFloat(document.getElementById('new-labor-qty').value) || 1;
+            const rate = parseFloat(document.getElementById('new-labor-rate').value) || 0;
+            const prep = parseFloat(document.getElementById('new-labor-prep').value) || 0;
+            const shoot = parseFloat(document.getElementById('new-labor-shoot').value) || 0;
+            const post = parseFloat(document.getElementById('new-labor-post').value) || 0;
+            const wrap = parseFloat(document.getElementById('new-labor-wrap').value) || 0;
+            const fringeType = document.getElementById('new-labor-fringe-type').value || 'percent';
+            const fringeRate = parseFloat(document.getElementById('new-labor-fringe-rate').value) || 0;
+            
+            // Create the labor item with all values
+            const laborItem = {
+                id: generateUUID(),
+                desc: desc,
+                num: qty,
+                prep: prep,
+                shoot: shoot,
+                post: post,
+                wrap: wrap,
+                rate: rate,
+                fringeType: fringeType,
+                fringeRate: fringeRate
+            };
+            
+            // Add to budget data
+            if (!budgetData['Labor']) {
+                budgetData['Labor'] = [];
+            }
+            budgetData['Labor'].push(laborItem);
+            
+            // Create related items if checkboxes are checked
+            if (document.getElementById('create-room').checked) {
+                if (!budgetData['Rooms']) {
+                    budgetData['Rooms'] = [];
+                }
+                budgetData['Rooms'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Room`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    laborRef: laborItem.id
+                });
+            }
+            
+            if (document.getElementById('create-equipment').checked) {
+                if (!budgetData['Equipment Rentals']) {
+                    budgetData['Equipment Rentals'] = [];
+                }
+                budgetData['Equipment Rentals'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Equipment`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    laborRef: laborItem.id
+                });
+            }
+            
+            if (document.getElementById('create-box-rental').checked) {
+                if (!budgetData['Box Rentals']) {
+                    budgetData['Box Rentals'] = [];
+                }
+                budgetData['Box Rentals'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Box Rental`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    fringeType: 'none',
+                    fringeRate: 0,
+                    laborRef: laborItem.id
+                });
+            }
+            
+            // Close modal and re-render
+            modal.style.display = 'none';
+            renderBudgetView();
+        };
+        
+        // Cancel button handler
+        document.getElementById('cancel-add-labor').onclick = () => {
+            modal.style.display = 'none';
+        };
+        
+        // Close X button handler
+        document.getElementById('add-labor-modal-close').onclick = () => {
+            modal.style.display = 'none';
+        };
+        
+        // Click outside modal to close
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+    }
     function loadSchedule() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -4464,6 +4899,39 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
             });
         }
     }
+    function setupBudgetEventDelegation() {
+        const container = document.getElementById('budget-view');
+        if (!container) return;
+        
+        // Use event delegation - attach once to the container
+        container.addEventListener('input', (e) => {
+            if (e.target.classList.contains('budget-input')) {
+                const parts = e.target.id.split('-');
+                const field = parts[1];
+                const id = parts[2];
+                
+                // Find and update the item
+                for (let category in budgetData) {
+                    const item = budgetData[category].find(item => item.id === id);
+                    if (item) {
+                        if (e.target.type === 'number') {
+                            item[field] = parseFloat(e.target.value) || 0;
+                        } else {
+                            item[field] = e.target.value;
+                        }
+                        
+                        // Handle syncing for labor items
+                        if (category === 'Labor' && ['prep', 'shoot', 'post', 'wrap', 'num'].includes(field)) {
+                            syncLaborWeeksToRelatedItems(id);
+                        }
+                        
+                        calculateBudgetTotals();
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     function updateBudgetForEditorCount() {
         if (!budgetData || !budgetData.Editorial) return;
@@ -4511,6 +4979,8 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
 
     function renderBudgetView() {
         const container = document.getElementById('budget-view');
+        if (!container) return;
+        
         container.innerHTML = '';
 
         for (const category in budgetData) {
@@ -4654,29 +5124,75 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         document.getElementById('grand-total').textContent = currencyFormat.format(grandTotal);
     }
 
+    function findBudgetItemById(id) {
+        for (let category in budgetData) {
+            const item = budgetData[category].find(item => item.id === id);
+            if (item) {
+                item.category = category; // Add category for reference
+                return item;
+            }
+        }
+        return null;
+    }
+
     function addBudgetEventListeners() {
         document.querySelectorAll('.budget-input').forEach(input => {
-            input.addEventListener('input', () => {
-                const id = input.closest('tr').dataset.id;
-                const category = input.closest('.budget-category-table').querySelector('h2').textContent;
-                const itemIndex = budgetData[category].findIndex(item => item.id === id);
-                if (itemIndex > -1) {
-                    const key = input.id.split('-')[1];
-                    budgetData[category][itemIndex][key] = input.type === 'number' ? parseFloat(input.value) : input.value;
+            input.addEventListener('input', (e) => {
+                const id = e.target.id.split('-')[2];
+                const field = e.target.id.split('-')[1];
+                const item = findBudgetItemById(id);
+                
+                if (item) {
+                    item[field] = e.target.type === 'number' ? 
+                        parseFloat(e.target.value) || 0 : e.target.value;
+                    
+                    // If this is a Labor item and weeks changed, sync to related items
+                    if (item.category === 'Labor' && 
+                        ['prep', 'shoot', 'post', 'wrap'].includes(field)) {
+                        syncLaborWeeksToRelatedItems(id);
+                    }
                 }
+                
                 calculateBudgetTotals();
             });
         });
 
-        document.querySelectorAll('.add-line-item-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const category = e.target.dataset.category;
-                budgetData[category].push({
-                    id: generateUUID(), desc: 'New Item', num: 1, prep: 0, shoot: 0, post: 0, wrap: 0, rate: 0, fringeType: 'percent', fringeRate: 25
-                });
-                renderBudgetView();
-            });
-        });
+        // Inside addBudgetEventListeners function, replace the add-line-item-btn handler with:
+document.querySelectorAll('.add-line-item-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        const category = e.target.dataset.category;
+        
+        if (category === 'Labor') {
+            // Use the modal for labor items
+            showAddLaborModal();
+        } else {
+            // Regular inline add for other categories
+            const newItem = {
+                id: generateUUID(),
+                desc: 'New Item',
+                num: 1,
+                prep: 0,
+                shoot: 0,
+                post: 0,
+                wrap: 0,
+                rate: 0
+            };
+            
+            // Add category-specific fields
+            if (category === 'Box Rentals') {
+                newItem.fringeType = 'none';
+                newItem.fringeRate = 0;
+            } else if (category === 'Fabrication') {
+                newItem.fringeType = 'percent';
+                newItem.fringeRate = 25;
+            }
+            
+            budgetData[category].push(newItem);
+            renderBudgetView();
+        }
+    });
+});    
+                
          document.querySelectorAll('.delete-line-item-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const id = e.target.dataset.id;
@@ -4684,6 +5200,95 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                 budgetData[category] = budgetData[category].filter(item => item.id !== id);
                 renderBudgetView();
             });
+        });
+    }
+    function autoGenerateCrewRelatedItems(laborItem) {
+        const crewName = laborItem.desc;
+        const laborId = laborItem.id;
+        
+        // Check if related items already exist
+        const roomExists = budgetData['Rooms'].some(item => 
+            item.desc.toLowerCase() === `${crewName.toLowerCase()} room` ||
+            item.laborRef === laborId
+        );
+        
+        if (!roomExists) {
+            // Add Room
+            budgetData['Rooms'].push({
+                id: generateUUID(),
+                desc: `${crewName} Room`,
+                num: laborItem.num || 1,
+                prep: 0,  // Will be linked to labor
+                shoot: 0, // Will be linked to labor
+                post: 0,  // Will be linked to labor
+                wrap: 0,  // Will be linked to labor
+                rate: 0,  // User can fill in later
+                laborRef: laborId  // Link to labor item
+            });
+            
+            // Add Equipment
+            budgetData['Equipment Rentals'].push({
+                id: generateUUID(),
+                desc: `${crewName} Equipment`,
+                num: laborItem.num || 1,
+                prep: 0,
+                shoot: 0,
+                post: 0,
+                wrap: 0,
+                rate: 0,
+                laborRef: laborId
+            });
+            
+            // Add Box Rental
+            budgetData['Box Rentals'].push({
+                id: generateUUID(),
+                desc: `${crewName} Box Rental`,
+                num: laborItem.num || 1,
+                prep: 0,
+                shoot: 0,
+                post: 0,
+                wrap: 0,
+                rate: 0,
+                fringeType: 'none',
+                fringeRate: 0,
+                laborRef: laborId
+            });
+        }
+    }
+    
+    // Function to sync weeks from labor to related items
+    function syncLaborWeeksToRelatedItems(laborId) {
+        const laborItem = budgetData['Labor'].find(item => item.id === laborId);
+        if (!laborItem) return;
+        
+        // Update Rooms
+        budgetData['Rooms'].forEach(item => {
+            if (item.laborRef === laborId) {
+                item.prep = laborItem.prep;
+                item.shoot = laborItem.shoot;
+                item.post = laborItem.post;
+                item.wrap = laborItem.wrap;
+            }
+        });
+        
+        // Update Equipment Rentals
+        budgetData['Equipment Rentals'].forEach(item => {
+            if (item.laborRef === laborId) {
+                item.prep = laborItem.prep;
+                item.shoot = laborItem.shoot;
+                item.post = laborItem.post;
+                item.wrap = laborItem.wrap;
+            }
+        });
+        
+        // Update Box Rentals
+        budgetData['Box Rentals'].forEach(item => {
+            if (item.laborRef === laborId) {
+                item.prep = laborItem.prep;
+                item.shoot = laborItem.shoot;
+                item.post = laborItem.post;
+                item.wrap = laborItem.wrap;
+            }
         });
     }
 
@@ -4701,6 +5306,7 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         setupAllEventListeners();
         setupEnhancedInputListeners();
         setupUnlinkToggleListener(); // ADD THIS LINE
+        setupBudgetEventDelegation();
         
         // Explicit handlers for the problematic checkboxes
         document.getElementById('producers-cuts-overlap').addEventListener('change', (e) => {
