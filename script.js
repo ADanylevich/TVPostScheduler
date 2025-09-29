@@ -4249,7 +4249,6 @@ function calculateCategoryTotal(category) {
                 budgetData[targetCategory] = [];
             }
             budgetData[targetCategory].push(laborItem);
-            
 
 // Create related items if checkboxes are checked
 if (document.getElementById('create-room') && document.getElementById('create-room').checked) {
