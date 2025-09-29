@@ -4248,67 +4248,61 @@ function calculateCategoryTotal(category) {
             if (!budgetData[targetCategory]) {
                 budgetData[targetCategory] = [];
             }
-            budgetData[targetCategory].push(laborItem);
-
-// Create related items if checkboxes are checked
-if (document.getElementById('create-room') && document.getElementById('create-room').checked) {
-    const roomRate = parseFloat(document.getElementById('room-rate').value) || 400;
-    if (!budgetData['Rooms']) {
-        budgetData['Rooms'] = [];
-    }
-    budgetData['Rooms'].push({
-        id: `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        desc: `${desc} Room`,
-        num: qty,
-        prep: prep,
-        shoot: shoot,
-        post: post,
-        wrap: wrap,
-        rate: roomRate, // Use the editable rate
-        laborRef: laborId,
-        laborCategory: targetCategory
-    });
-}
-
-if (document.getElementById('create-equipment') && document.getElementById('create-equipment').checked) {
-    const equipmentRate = parseFloat(document.getElementById('equipment-rate').value) || 650;
-    if (!budgetData['Equipment Rentals']) {
-        budgetData['Equipment Rentals'] = [];
-    }
-    budgetData['Equipment Rentals'].push({
-        id: `equipment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        desc: desc.toLowerCase().includes('editor') ? `AVID Rental (${desc})` : `${desc} Equipment`,
-        num: qty,
-        prep: prep,
-        shoot: shoot,
-        post: post,
-        wrap: wrap,
-        rate: equipmentRate, // Use the editable rate
-        laborRef: laborId,
-        laborCategory: targetCategory
-    });
-}
-
-if (document.getElementById('create-box-rental') && document.getElementById('create-box-rental').checked) {
-    const boxRate = parseFloat(document.getElementById('box-rate').value) || 50;
-    if (!budgetData['Box Rentals']) {
-        budgetData['Box Rentals'] = [];
-    }
-    budgetData['Box Rentals'].push({
-        id: `box_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        desc: `Box Rental (${desc})`,
-        num: qty,
-        prep: prep,
-        shoot: shoot,
-        post: post,
-        wrap: wrap,
-        rate: boxRate, // Use the editable rate
-        fringeType: 'capped',
-        fringeRate: 500,
-        laborRef: laborId,
-        laborCategory: targetCategory
-    });
-}
+            budgetData['Labor'].push(laborItem);
+            
+            // Create related items if checkboxes are checked
+            if (document.getElementById('create-room').checked) {
+                if (!budgetData['Rooms']) {
+                    budgetData['Rooms'] = [];
+                }
+                budgetData['Rooms'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Room`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    laborRef: laborItem.id
+                });
+            }
+            
+            if (document.getElementById('create-equipment').checked) {
+                if (!budgetData['Equipment Rentals']) {
+                    budgetData['Equipment Rentals'] = [];
+                }
+                budgetData['Equipment Rentals'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Equipment`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    laborRef: laborItem.id
+                });
+            }
+            
+            if (document.getElementById('create-box-rental').checked) {
+                if (!budgetData['Box Rentals']) {
+                    budgetData['Box Rentals'] = [];
+                }
+                budgetData['Box Rentals'].push({
+                    id: generateUUID(),
+                    desc: `${desc} Box Rental`,
+                    num: qty,
+                    prep: prep,
+                    shoot: shoot,
+                    post: post,
+                    wrap: wrap,
+                    rate: 0, // User can set this later
+                    fringeType: 'none',
+                    fringeRate: 0,
+                    laborRef: laborItem.id
+                });
+            }
             
             // Close modal and re-render
             modal.style.display = 'none';
