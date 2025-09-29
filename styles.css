@@ -1188,8 +1188,82 @@ input:checked + .slider:before {
 .waterfall-task-bar:active {
     cursor: grabbing;
 }
-/* --- Conflict Resolution Modal Styles (Add to styles.css) --- */
 
+/* Labor Modal Styles */
+#add-labor-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+#add-labor-modal .modal-content {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+#add-labor-modal .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+#add-labor-modal .modal-header h2 {
+    margin: 0;
+    color: #1e293b;
+}
+
+#add-labor-modal .modal-close-button {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #64748b;
+}
+
+#add-labor-modal .modal-close-button:hover {
+    color: #1e293b;
+}
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    padding: 5px 0;
+}
+
+.checkbox-item label {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+}
+
+.checkbox-item input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.checkbox-item input[type="number"] {
+    padding: 4px 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+}
 /* Override modal width for conflict resolution */
 .conflict-modal-content {
     max-width: 85%;
