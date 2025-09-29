@@ -359,65 +359,97 @@
         </div>
     </div>
 </div>
-<div id="add-labor-modal" class="modal">
+<!-- Add Labor Modal -->
+<div id="add-labor-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
-            <h3>Add New Crew Member</h3>
-            <span class="modal-close" id="add-labor-modal-close">&times;</span>
+            <h2>Add Staff Member</h2>
+            <button id="add-labor-modal-close" class="modal-close-button">&times;</button>
         </div>
-        <div class="modal-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-            <div class="control-group" style="grid-column: span 2;">
-                <label>Position/Title:</label>
-                <input type="text" id="new-labor-desc" placeholder="e.g., Color Assistant" style="width: 100%;">
-            </div>
+        <div class="modal-body">
             <div class="control-group">
-                <label>Quantity:</label>
-                <input type="number" id="new-labor-qty" value="1" min="1">
+                <label for="new-labor-desc">Description/Title</label>
+                <input type="text" id="new-labor-desc" placeholder="e.g., Senior Editor, VFX Supervisor" required>
             </div>
-            <div class="control-group">
-                <label>Rate ($/week):</label>
-                <input type="number" id="new-labor-rate" value="0" min="0">
+            
+            <div class="control-group half-width">
+                <label for="new-labor-num">Quantity</label>
+                <input type="number" id="new-labor-num" value="1" min="0" step="0.5">
             </div>
-            <div class="control-group">
-                <label>Prep Weeks:</label>
-                <input type="number" id="new-labor-prep" value="0" min="0" step="0.1">
+            
+            <div class="control-group half-width">
+                <label for="new-labor-rate">Rate ($/week)</label>
+                <input type="number" id="new-labor-rate" placeholder="0" min="0" step="50">
             </div>
-            <div class="control-group">
-                <label>Shoot Weeks:</label>
-                <input type="number" id="new-labor-shoot" value="0" min="0" step="0.1">
-            </div>
-            <div class="control-group">
-                <label>Post Weeks:</label>
-                <input type="number" id="new-labor-post" value="0" min="0" step="0.1">
-            </div>
-            <div class="control-group">
-                <label>Wrap Weeks:</label>
-                <input type="number" id="new-labor-wrap" value="0" min="0" step="0.1">
-            </div>
-            <div class="control-group">
-                <label>Fringe Type:</label>
-                <select id="new-labor-fringe-type">
-                    <option value="percent" selected>Percentage</option>
-                    <option value="flat">Flat Rate</option>
-                    <option value="none">None</option>
-                </select>
-            </div>
-            <div class="control-group">
-                <label>Fringe Rate (% or $):</label>
-                <input type="number" id="new-labor-fringe-rate" value="25" min="0">
-            </div>
-            <div class="control-group" style="grid-column: span 2; margin-top: 15px;">
-                <label style="font-weight: bold;">Create Related Items:</label>
-                <div style="display: flex; gap: 20px; margin-top: 10px;">
-                    <label><input type="checkbox" id="create-room" checked> Room</label>
-                    <label><input type="checkbox" id="create-equipment" checked> Equipment</label>
-                    <label><input type="checkbox" id="create-box-rental" checked> Box Rental</label>
+            
+            <div class="schedule-group">
+                <h4>Schedule (Weeks)</h4>
+                <div class="control-group quarter-width">
+                    <label for="new-labor-prep">Prep</label>
+                    <input type="number" id="new-labor-prep" value="0" min="0" step="0.5">
+                </div>
+                <div class="control-group quarter-width">
+                    <label for="new-labor-shoot">Shoot</label>
+                    <input type="number" id="new-labor-shoot" value="0" min="0" step="0.5">
+                </div>
+                <div class="control-group quarter-width">
+                    <label for="new-labor-post">Post</label>
+                    <input type="number" id="new-labor-post" value="0" min="0" step="0.5">
+                </div>
+                <div class="control-group quarter-width">
+                    <label for="new-labor-wrap">Wrap</label>
+                    <input type="number" id="new-labor-wrap" value="0" min="0" step="0.5">
                 </div>
             </div>
-        </div>
+            
+            <div class="fringe-group">
+                <h4>Fringe Benefits</h4>
+                <div class="control-group half-width">
+                    <label for="new-labor-fringe-type">Fringe Type</label>
+                    <select id="new-labor-fringe-type">
+                        <option value="none">None</option>
+                        <option value="percent" selected>Percentage</option>
+                        <option value="flat">Flat Rate</option>
+                    </select>
+                </div>
+                <div class="control-group half-width">
+                    <label for="new-labor-fringe-rate">Fringe Rate</label>
+                    <input type="number" id="new-labor-fringe-rate" placeholder="0" min="0" step="0.5">
+                </div>
+            </div>
+            
+            <div class="additional-items-group">
+                <h4>Create Related Items</h4>
+                <div class="checkbox-group">
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="create-room">
+                            <span>Create Room</span>
+                        </label>
+                        <input type="number" id="room-rate" value="400" min="0" step="50" style="width: 80px; margin-left: 10px;">
+                        <span>/week</span>
+                    </div>
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="create-equipment">
+                            <span>Create Equipment Rental</span>
+                        </label>
+                        <input type="number" id="equipment-rate" value="650" min="0" step="50" style="width: 80px; margin-left: 10px;">
+                        <span>/week</span>
+                    </div>
+                    <div class="checkbox-item">
+                        <label>
+                            <input type="checkbox" id="create-box-rental">
+                            <span>Create Box Rental</span>
+                        </label>
+                        <input type="number" id="box-rate" value="50" min="0" step="50" style="width: 80px; margin-left: 10px;">
+                        <span>/week</span>
+                    </div>
+                </div>
+            </div>
         <div class="modal-footer">
-            <button id="cancel-add-labor" class="secondary-action">Cancel</button>
-            <button id="confirm-add-labor" class="primary-action">Add Crew Member</button>
+            <button id="cancel-add-labor" class="secondary-button">Cancel</button>
+            <button id="confirm-add-labor" class="primary-button">Add Staff Member</button>
         </div>
     </div>
 </div>

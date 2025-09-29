@@ -564,11 +564,44 @@ function validateManualAnchors(manuallySetTasks) {
     });
 }
     function renderAllViews() {
-        renderGanttChart();
-        renderWaterfallChart();
-        renderGridView();
-        renderBudgetView();
-        viewState = { timeline: 'fresh', waterfall: 'fresh', grid: 'fresh', budget: 'fresh' };
+        try {
+            console.log('Starting renderAllViews...');
+            
+            if (typeof renderGanttChart === 'function') {
+                renderGanttChart();
+            } else {
+                console.error('renderGanttChart is not defined');
+            }
+            
+            if (typeof renderWaterfallChart === 'function') {
+                renderWaterfallChart();
+            } else {
+                console.error('renderWaterfallChart is not defined');
+            }
+            
+            if (typeof renderGridView === 'function') {
+                renderGridView();
+            } else {
+                console.error('renderGridView is not defined');
+            }
+            
+            if (typeof renderBudgetView === 'function') {
+                renderBudgetView();
+            } else {
+                console.error('renderBudgetView is not defined');
+            }
+            
+            viewState = { 
+                timeline: 'fresh', 
+                waterfall: 'fresh', 
+                grid: 'fresh', 
+                budget: 'fresh' 
+            };
+            
+            console.log('renderAllViews completed successfully');
+        } catch (error) {
+            console.error('Error in renderAllViews:', error);
+        }
     }
 
     function calculateAndRender() {
@@ -654,8 +687,8 @@ function validateManualAnchors(manuallySetTasks) {
 
         budgetData = {
             "Post-Production Staff": staffItems,
-            "Editorial": editorialItems,
-            "VFX": vfxItems,
+            "Editorial Staff": editorialItems,
+            "VFX Staff": vfxItems,
             "Rooms": roomItems,
             "Equipment Rentals": equipmentItems,
             "Box Rentals": []
@@ -3251,58 +3284,77 @@ function addWaterfallDragListeners() {
 document.getElementById('waterfall-container').addEventListener('mousedown', onMouseDown);
 }  // This closes addWaterfallDragListeners
 
-    function setupTabControls() {
-        const tabButtons = document.querySelectorAll('.tab-button');
-        const viewContainers = document.querySelectorAll('.view-container');
-        const exportButton = document.getElementById('export-smart');
+function setupTabControls() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const viewContainers = document.querySelectorAll('.view-container');
+    const exportButton = document.getElementById('export-smart');
 
-        tabButtons.forEach(button => {
-            button.addEventListener('click', () => {
-                tabButtons.forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
 
-                currentView = button.id.replace('tab-', '');
-                const viewId = `${currentView}-view`;
+            currentView = button.id.replace('tab-', '');
+            const viewId = `${currentView}-view`;
 
-                viewContainers.forEach(container => {
-                    container.classList.toggle('hidden', container.id !== viewId);
-                });
-
-                if (currentView === 'grid') {
-                    renderGridView();
-                    viewState.grid = 'fresh';
-                } else if (currentView === 'budget') {
-                    renderBudgetView();
-                    viewState.budget = 'fresh';
-                } else {
-                    if (currentView === 'timeline' && viewState.timeline === 'stale'){
-                        renderGanttChart();
-                        viewState.timeline = 'fresh';
-                    }
-                    else if (currentView === 'waterfall' && viewState.waterfall === 'stale') {
-                        renderWaterfallChart();
-                        viewState.waterfall = 'fresh';
-                    }
-                }
-
-                if (currentView === 'timeline') {
-                    exportButton.textContent = 'Timeline (XLSX)';
-                    exportButton.onclick = exportTimelineToExcel;
-                } else if (currentView === 'waterfall') {
-                    exportButton.textContent = 'Waterfall (XLSX)';
-                    exportButton.onclick = exportWaterfallToExcel;
-                } else if (currentView === 'grid') {
-                    exportButton.textContent = 'Grid (PDF)';
-                    exportButton.onclick = exportGridToPDF;
-                } else if (currentView === 'budget') {
-                    exportButton.textContent = 'Export Budget (XLSX)';
-                    exportButton.onclick = exportBudgetToExcel;
-                }
+            viewContainers.forEach(container => {
+                container.classList.toggle('hidden', container.id !== viewId);
             });
+
+            if (currentView === 'grid') {
+                renderGridView();
+                viewState.grid = 'fresh';
+            } else if (currentView === 'budget') {
+                initializeBudgetData();
+                renderBudgetView();
+                viewState.budget = 'fresh';
+            } else {
+                // FIX: Complete the condition properly
+                if (currentView === 'timeline' && viewState.timeline === 'stale') {
+                    renderGanttChart();
+                    viewState.timeline = 'fresh';
+                }
+                else if (currentView === 'waterfall' && viewState.waterfall === 'stale') {
+                    renderWaterfallChart();
+                    viewState.waterfall = 'fresh';
+                }
+            }
+
+            // Update export button based on current view
+            if (currentView === 'timeline') {
+                exportButton.textContent = 'Timeline (XLSX)';
+                exportButton.onclick = exportTimelineToExcel;
+            } else if (currentView === 'waterfall') {
+                exportButton.textContent = 'Waterfall (XLSX)';
+                exportButton.onclick = exportWaterfallToExcel;
+            } else if (currentView === 'grid') {
+                exportButton.textContent = 'Grid (PDF)';
+                exportButton.onclick = exportGridToPDF;
+            } else if (currentView === 'budget') {
+                exportButton.textContent = 'Export Budget (XLSX)';
+                exportButton.onclick = function() {
+                    try {
+                        initializeBudgetData(); // Ensure data is initialized
+                        exportBudgetToExcel();
+                    } catch (error) {
+                        console.error('Error exporting budget:', error);
+                        alert('An error occurred while exporting the budget. Please check the console for details.');
+                    }
+                };
+            }
         });
-        document.getElementById('export-smart').onclick = exportTimelineToExcel;
-        document.getElementById('export-calendar').addEventListener('click', exportToICS);
+    });
+    
+    // Initialize default export button
+    if (exportButton) {
+        exportButton.onclick = exportTimelineToExcel;
     }
+    
+    const exportCalendarBtn = document.getElementById('export-calendar');
+    if (exportCalendarBtn) {
+        exportCalendarBtn.addEventListener('click', exportToICS);
+    }
+}
 
     function getFormattedTimestamp() {
         const now = new Date();
@@ -3693,70 +3745,123 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
             alert('Excel export library not loaded. Please refresh and try again.');
             return;
         }
-        
+           
+        // Ensure budgetData exists and has categories
+        if (!budgetData || typeof budgetData !== 'object') {
+            alert('No budget data available to export. Please create a budget first.');
+            return;
+        }
+    
         const wb = XLSX.utils.book_new();
         
-        // Build comprehensive labor mapping with multiple lookup keys
+        // Define staff categories (these replace "Labor")
+        const staffCategories = ["Post-Production Staff", "Editorial Staff", "VFX Staff"];
+        const otherCategories = ["Rooms", "Equipment Rentals", "Box Rentals"];
+        const allCategories = [...staffCategories, ...otherCategories];
+        
+        // Build comprehensive labor mapping from ALL staff categories
         const laborMapping = {};
         const laborDescToRow = {};
-        let laborStartRow = 2;
+        const categorySheetMapping = {}; // Maps categories to their sheet names
         
-        if (budgetData['Labor']) {
-            budgetData['Labor'].forEach((item, index) => {
-                const excelRow = laborStartRow + index;
+        // Process each staff category to build the labor mapping
+        staffCategories.forEach(staffCategory => {
+            if (!budgetData[staffCategory] || !Array.isArray(budgetData[staffCategory])) {
+                return;
+            }
+            
+            let startRow = 2; // Starting row in each sheet
+            const sheetName = staffCategory.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '');
+            categorySheetMapping[staffCategory] = sheetName;
+            
+            budgetData[staffCategory].forEach((item, index) => {
+                const excelRow = startRow + index;
+                const uniqueId = `${staffCategory}_${item.id}`;
                 
-                // Store by ID
-                laborMapping[item.id] = {
+                // Store by unique ID with category context
+                laborMapping[uniqueId] = {
                     row: excelRow,
                     desc: item.desc,
                     num: item.num,
                     prep: item.prep,
                     shoot: item.shoot,
                     post: item.post,
-                    wrap: item.wrap
+                    wrap: item.wrap,
+                    category: staffCategory,
+                    sheetName: sheetName
                 };
                 
                 // Store by description variations for fallback matching
                 const descKey = item.desc.toLowerCase().trim();
-                laborDescToRow[descKey] = excelRow;
                 
-                // Also store without common suffixes for easier matching
+                // Store with category-specific key and also generic key for backward compatibility
+                laborDescToRow[`${staffCategory}:${descKey}`] = {
+                    row: excelRow,
+                    category: staffCategory,
+                    sheetName: sheetName
+                };
+                
+                // Also store without category prefix for generic matching
+                if (!laborDescToRow[descKey]) {
+                    laborDescToRow[descKey] = {
+                        row: excelRow,
+                        category: staffCategory,
+                        sheetName: sheetName
+                    };
+                }
+                
+                // Store without common suffixes for easier matching
                 const baseName = descKey
                     .replace(/\s*\(.*\)/, '') // Remove parenthetical
                     .replace(/\s*-.*/, ''); // Remove dash suffixes
-                if (baseName !== descKey) {
-                    laborDescToRow[baseName] = excelRow;
+                if (baseName !== descKey && !laborDescToRow[baseName]) {
+                    laborDescToRow[baseName] = {
+                        row: excelRow,
+                        category: staffCategory,
+                        sheetName: sheetName
+                    };
                 }
                 
                 // Store common abbreviations
                 if (descKey.includes('assistant')) {
-                    laborDescToRow[descKey.replace('assistant', 'asst')] = excelRow;
-                    laborDescToRow[descKey.replace('assistant', 'ast')] = excelRow;
+                    const asst = descKey.replace('assistant', 'asst');
+                    const ast = descKey.replace('assistant', 'ast');
+                    if (!laborDescToRow[asst]) laborDescToRow[asst] = { row: excelRow, category: staffCategory, sheetName };
+                    if (!laborDescToRow[ast]) laborDescToRow[ast] = { row: excelRow, category: staffCategory, sheetName };
                 }
                 if (descKey.includes('producer')) {
-                    laborDescToRow[descKey.replace('producer', 'prod')] = excelRow;
+                    const prod = descKey.replace('producer', 'prod');
+                    if (!laborDescToRow[prod]) laborDescToRow[prod] = { row: excelRow, category: staffCategory, sheetName };
                 }
                 if (descKey.includes('coordinator')) {
-                    laborDescToRow[descKey.replace('coordinator', 'coord')] = excelRow;
+                    const coord = descKey.replace('coordinator', 'coord');
+                    if (!laborDescToRow[coord]) laborDescToRow[coord] = { row: excelRow, category: staffCategory, sheetName };
                 }
             });
-        }
+        });
         
         // Helper function to find labor reference with comprehensive matching
         const findLaborReference = (item) => {
-            // First check laborRef if it exists
-            if (item.laborRef && laborMapping[item.laborRef]) {
-                return laborMapping[item.laborRef];
+            // First check laborRef if it exists with category context
+            if (item.laborRef) {
+                // Try with each staff category prefix
+                for (let category of staffCategories) {
+                    const uniqueId = `${category}_${item.laborRef}`;
+                    if (laborMapping[uniqueId]) {
+                        return laborMapping[uniqueId];
+                    }
+                }
+                // Try without prefix for backward compatibility
+                if (laborMapping[item.laborRef]) {
+                    return laborMapping[item.laborRef];
+                }
             }
             
             const itemDesc = (item.desc || '').toLowerCase().trim();
             
             // Direct description match
             if (laborDescToRow[itemDesc]) {
-                return {
-                    row: laborDescToRow[itemDesc],
-                    desc: itemDesc
-                };
+                return laborDescToRow[itemDesc];
             }
             
             // Pattern matching for rooms/equipment/box rentals
@@ -3777,22 +3882,19 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                 if (match && match[pattern.captureGroup]) {
                     const baseName = match[pattern.captureGroup].toLowerCase().trim();
                     if (laborDescToRow[baseName]) {
-                        return {
-                            row: laborDescToRow[baseName],
-                            desc: baseName
-                        };
+                        return laborDescToRow[baseName];
                     }
                 }
             }
             
             // Fuzzy matching - find partial matches
             for (let laborDesc in laborDescToRow) {
+                // Skip category-prefixed keys for fuzzy matching
+                if (laborDesc.includes(':')) continue;
+                
                 // Check if item description contains labor description or vice versa
                 if (itemDesc.includes(laborDesc) || laborDesc.includes(itemDesc)) {
-                    return {
-                        row: laborDescToRow[laborDesc],
-                        desc: laborDesc
-                    };
+                    return laborDescToRow[laborDesc];
                 }
                 
                 // Check for common word overlap
@@ -3802,10 +3904,7 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                     laborWords.includes(word) && word.length > 3
                 );
                 if (commonWords.length >= 2) {
-                    return {
-                        row: laborDescToRow[laborDesc],
-                        desc: laborDesc
-                    };
+                    return laborDescToRow[laborDesc];
                 }
             }
             
@@ -3825,10 +3924,13 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         let summaryRow = 7;
         const categoryRows = {};
         
-        Object.keys(budgetData).forEach(category => {
-            categoryRows[category] = summaryRow;
-            summaryData.push([category, '']);
-            summaryRow++;
+        // Only process categories that exist and have data
+        allCategories.forEach(category => {
+            if (budgetData[category] && Array.isArray(budgetData[category]) && budgetData[category].length > 0) {
+                categoryRows[category] = summaryRow;
+                summaryData.push([category, '']);
+                summaryRow++;
+            }
         });
         
         summaryData.push(['', '']);
@@ -3838,129 +3940,174 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
         
         // Process each category
-        Object.keys(budgetData).forEach(category => {
-            const categoryData = [];
-            let currentRow = 1;
-            
-            // Add headers based on category type
-            if (category === "Labor" || category === "Fabrication") {
-                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Type', 'Fringe Rate', 'Labor Total', 'Fringe Total', 'Total']);
-            } else if (category === "Rooms" || category === "Equipment Rentals") {
-                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Total', 'Labor Link']);
-            } else if (category === "Box Rentals") {
-                categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Capped', 'Fringe Cap', 'Total', 'Labor Link']);
-            }
-            currentRow++;
-            
-            // Process each item in the category
-            budgetData[category].forEach((item, index) => {
-                const rowNum = currentRow + index;
-                
-                if (category === "Labor" || category === "Fabrication") {
-                    categoryData.push([
-                        item.desc || '',
-                        item.num || 0,
-                        item.prep || 0,
-                        item.shoot || 0,
-                        item.post || 0,
-                        item.wrap || 0,
-                        { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
-                        item.rate || 0,
-                        item.fringeType || 'percent',
-                        item.fringeRate || 0,
-                        { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
-                        { t: 'n', f: `IF(I${rowNum}="percent",K${rowNum}*J${rowNum}/100,IF(I${rowNum}="flat",J${rowNum}*G${rowNum}*B${rowNum},0))` },
-                        { t: 'n', f: `K${rowNum}+L${rowNum}` }
-                    ]);
-                } else if (category === "Rooms" || category === "Equipment Rentals") {
-                    const laborLink = findLaborReference(item);
-                    if (laborLink) {
-                        categoryData.push([
-                            item.desc || '',
-                            { t: 'n', f: `Labor!B${laborLink.row}` },
-                            { t: 'n', f: `Labor!C${laborLink.row}` },
-                            { t: 'n', f: `Labor!D${laborLink.row}` },
-                            { t: 'n', f: `Labor!E${laborLink.row}` },
-                            { t: 'n', f: `Labor!F${laborLink.row}` },
-                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
-                            item.rate || 0,
-                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
-                            laborLink.desc || ''
-                        ]);
-                    } else {
-                        categoryData.push([
-                            item.desc || '',
-                            item.num || 0,
-                            item.prep || 0,
-                            item.shoot || 0,
-                            item.post || 0,
-                            item.wrap || 0,
-                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
-                            item.rate || 0,
-                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
-                            ''
-                        ]);
-                    }
-                } else if (category === "Box Rentals") {
-                    const laborLink = findLaborReference(item);
-                    if (laborLink) {
-                        categoryData.push([
-                            item.desc || '',
-                            { t: 'n', f: `Labor!B${laborLink.row}` },
-                            { t: 'n', f: `Labor!C${laborLink.row}` },
-                            { t: 'n', f: `Labor!D${laborLink.row}` },
-                            { t: 'n', f: `Labor!E${laborLink.row}` },
-                            { t: 'n', f: `Labor!F${laborLink.row}` },
-                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
-                            item.rate || 0,
-                            item.fringeType === 'capped' ? 'Yes' : 'No',
-                            item.fringeRate || 0,
-                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
-                            laborLink.desc || ''
-                        ]);
-                    } else {
-                        categoryData.push([
-                            item.desc || '',
-                            item.num || 0,
-                            item.prep || 0,
-                            item.shoot || 0,
-                            item.post || 0,
-                            item.wrap || 0,
-                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
-                            item.rate || 0,
-                            item.fringeType === 'capped' ? 'Yes' : 'No',
-                            item.fringeRate || 0,
-                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
-                            ''
-                        ]);
-                    }
+        Object.keys(categoryRows).forEach(category => {
+            try {
+                // Safety check
+                if (!budgetData[category] || !Array.isArray(budgetData[category])) {
+                    console.warn(`Category ${category} is not properly initialized`);
+                    return;
                 }
-            });
-            
-            // Add subtotal row
-            const dataEndRow = currentRow + budgetData[category].length - 1;
-            const subtotalRow = new Array(categoryData[0].length - 2).fill('');
-            
-            let totalColumn;
-            if (category === "Labor" || category === "Fabrication") {
-                totalColumn = 'M';
-            } else if (category === "Rooms" || category === "Equipment Rentals") {
-                totalColumn = 'I';
-            } else if (category === "Box Rentals") {
-                totalColumn = 'K';
+                
+                if (budgetData[category].length === 0) {
+                    console.warn(`Category ${category} has no items`);
+                    return;
+                }
+                
+                const categoryData = [];
+                let currentRow = 1;
+                const isStaffCategory = staffCategories.includes(category);
+                
+                // Add headers based on category type
+                if (isStaffCategory) {
+                    // Staff categories use labor format
+                    categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Type', 'Fringe Rate', 'Labor Total', 'Fringe Total', 'Total']);
+                } else if (category === "Rooms" || category === "Equipment Rentals") {
+                    categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Total', 'Labor Link']);
+                } else if (category === "Box Rentals") {
+                    categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Capped', 'Fringe Cap', 'Total', 'Labor Link']);
+                }
+                currentRow++;
+                
+                // Process each item in the category
+                budgetData[category].forEach((item, index) => {
+                    const rowNum = currentRow + index;
+                    
+                    if (isStaffCategory) {
+                        // Staff categories use labor format
+                        categoryData.push([
+                            item.desc || '',
+                            item.num || 0,
+                            item.prep || 0,
+                            item.shoot || 0,
+                            item.post || 0,
+                            item.wrap || 0,
+                            { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                            item.rate || 0,
+                            item.fringeType || 'percent',
+                            item.fringeRate || 0,
+                            { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                            { t: 'n', f: `IF(I${rowNum}="percent",K${rowNum}*J${rowNum}/100,IF(I${rowNum}="flat",J${rowNum}*G${rowNum}*B${rowNum},0))` },
+                            { t: 'n', f: `K${rowNum}+L${rowNum}` }
+                        ]);
+                    } else if (category === "Rooms" || category === "Equipment Rentals") {
+                        const laborLink = findLaborReference(item);
+                        if (laborLink) {
+                            // Reference the appropriate staff sheet
+                            const refSheet = laborLink.sheetName || 'Post-Production Staff';
+                            categoryData.push([
+                                item.desc || '',
+                                { t: 'n', f: `'${refSheet}'!B${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!C${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!D${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!E${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!F${laborLink.row}` },
+                                { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                                item.rate || 0,
+                                { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                                laborLink.desc || ''
+                            ]);
+                        } else {
+                            categoryData.push([
+                                item.desc || '',
+                                item.num || 0,
+                                item.prep || 0,
+                                item.shoot || 0,
+                                item.post || 0,
+                                item.wrap || 0,
+                                { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                                item.rate || 0,
+                                { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}` },
+                                ''
+                            ]);
+                        }
+                    } else if (category === "Box Rentals") {
+                        const laborLink = findLaborReference(item);
+                        if (laborLink) {
+                            // Reference the appropriate staff sheet
+                            const refSheet = laborLink.sheetName || 'Post-Production Staff';
+                            categoryData.push([
+                                item.desc || '',
+                                { t: 'n', f: `'${refSheet}'!B${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!C${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!D${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!E${laborLink.row}` },
+                                { t: 'n', f: `'${refSheet}'!F${laborLink.row}` },
+                                { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                                item.rate || 0,
+                                item.fringeType === 'capped' ? 'Yes' : 'No',
+                                item.fringeRate || 0,
+                                { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
+                                laborLink.desc || ''
+                            ]);
+                        } else {
+                            categoryData.push([
+                                item.desc || '',
+                                item.num || 0,
+                                item.prep || 0,
+                                item.shoot || 0,
+                                item.post || 0,
+                                item.wrap || 0,
+                                { t: 'n', f: `C${rowNum}+D${rowNum}+E${rowNum}+F${rowNum}` },
+                                item.rate || 0,
+                                item.fringeType === 'capped' ? 'Yes' : 'No',
+                                item.fringeRate || 0,
+                                { t: 'n', f: `B${rowNum}*G${rowNum}*H${rowNum}+IF(I${rowNum}="Yes",MIN(B${rowNum}*G${rowNum}*H${rowNum}*0.25,J${rowNum}),0)` },
+                                ''
+                            ]);
+                        }
+                    }
+                });
+                
+                // Add subtotal row
+const dataEndRow = currentRow + budgetData[category].length - 1;
+
+let totalColumn;
+let totalColumnIndex;
+if (isStaffCategory) {
+    totalColumn = 'M';
+    totalColumnIndex = 12; // M is the 13th column (0-indexed)
+} else if (category === "Rooms" || category === "Equipment Rentals") {
+    totalColumn = 'I';
+    totalColumnIndex = 8; // I is the 9th column (0-indexed)
+} else if (category === "Box Rentals") {
+    totalColumn = 'K';
+    totalColumnIndex = 10; // K is the 11th column (0-indexed)
+}
+
+// Build subtotal row with proper column positioning
+const subtotalRow = [];
+for (let i = 0; i < categoryData[0].length; i++) {
+    if (i === totalColumnIndex - 1) {
+        // Put "Subtotal" in the column before the total
+        subtotalRow.push('Subtotal');
+    } else if (i === totalColumnIndex) {
+        // Put the SUM formula in the total column
+        subtotalRow.push({ t: 'n', f: `SUM(${totalColumn}2:${totalColumn}${dataEndRow})` });
+    } else {
+        // Empty cells for all other columns
+        subtotalRow.push('');
+    }
+}
+categoryData.push(subtotalRow);
+                
+                const categorySheet = XLSX.utils.aoa_to_sheet(categoryData);
+                const sheetName = category.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '');
+                XLSX.utils.book_append_sheet(wb, categorySheet, sheetName);
+                
+                // Store sheet name for this category
+                categorySheetMapping[category] = sheetName;
+                
+                // Update summary reference
+                const subtotalRowNum = dataEndRow + 1;
+                summarySheet['B' + categoryRows[category]] = { t: 'n', f: `'${sheetName}'!${totalColumn}${subtotalRowNum}` };
+                
+            } catch (error) {
+                console.error(`Error processing category ${category}:`, error);
+                // Add empty sheet on error
+                const emptySheet = XLSX.utils.aoa_to_sheet([['Error processing category']]);
+                const sheetName = category.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '');
+                XLSX.utils.book_append_sheet(wb, emptySheet, sheetName);
             }
-            
-            subtotalRow.push('Subtotal');
-            subtotalRow.push({ t: 'n', f: `SUM(${totalColumn}2:${totalColumn}${dataEndRow})` });
-            categoryData.push(subtotalRow);
-            
-            const categorySheet = XLSX.utils.aoa_to_sheet(categoryData);
-            const sheetName = category.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '');
-            XLSX.utils.book_append_sheet(wb, categorySheet, sheetName);
-            
-            // Update summary reference
-            const subtotalRowNum = dataEndRow + 1;
-            summarySheet['B' + categoryRows[category]] = { t: 'n', f: `'${sheetName}'!${totalColumn}${subtotalRowNum}` };
         });
         
         const showName = document.getElementById('show-name').value || 'Schedule';
@@ -3969,30 +4116,77 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         
         XLSX.writeFile(wb, filename);
     }
-    
-    // Helper function for calculating category totals in the web app
-    function calculateCategoryTotal(category) {
-        let total = 0;
-        budgetData[category].forEach(item => {
-            const totalWeeks = (item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0);
-            const laborTotal = (item.num || 0) * totalWeeks * (item.rate || 0);
-            
-            let fringeTotal = 0;
-            if (category !== "Rooms" && category !== "Equipment Rentals") {
-                if (item.fringeType === 'percent') {
-                    fringeTotal = laborTotal * ((item.fringeRate || 0) / 100);
-                } else if (item.fringeType === 'flat') {
-                    fringeTotal = (item.fringeRate || 0) * totalWeeks * (item.num || 0);
-                } else if (item.fringeType === 'capped' && category === "Box Rentals") {
-                    fringeTotal = Math.min(laborTotal * 0.25, item.fringeRate || 0);
-                }
+
+    function initializeBudgetData() {
+        if (!window.budgetData) {
+            window.budgetData = {};
+        }
+        
+        // Use the EXACT same category names as in loadDefaults
+        const categories = [
+            "Post-Production Staff",  // WITH hyphen to match loadDefaults
+            "Editorial Staff", 
+            "VFX Staff",
+            "Rooms", 
+            "Equipment Rentals", 
+            "Box Rentals"
+        ];
+        
+        categories.forEach(category => {
+            if (!budgetData[category]) {
+                budgetData[category] = [];
             }
-            
-            total += laborTotal + fringeTotal;
         });
-        return total;
+    
+        
+        // Migrate old data if it exists
+        if (budgetData['Editorial'] && !budgetData['Editorial Staff']) {
+            budgetData['Editorial Staff'] = budgetData['Editorial'];
+            delete budgetData['Editorial'];
+        }
+        if (budgetData['VFX'] && !budgetData['VFX Staff']) {
+            budgetData['VFX Staff'] = budgetData['VFX'];
+            delete budgetData['VFX'];
+        }
+        
+        // Remove deprecated categories
+        delete budgetData['Labor'];
+        delete budgetData['Fabrication'];
     }
-    function showAddLaborModal() {
+    
+   
+function calculateCategoryTotal(category) {
+    let total = 0;
+    
+    if (!budgetData[category] || !Array.isArray(budgetData[category])) {
+        return 0;
+    }
+    
+    // Define staff categories
+    const staffCategories = ["Post-Production Staff", "Editorial Staff", "VFX Staff"];
+    const isStaffCategory = staffCategories.includes(category);
+    
+    budgetData[category].forEach(item => {
+        const totalWeeks = (item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0);
+        const laborTotal = (item.num || 0) * totalWeeks * (item.rate || 0);
+        
+        let fringeTotal = 0;
+        if (isStaffCategory || category === "Box Rentals") {
+            if (item.fringeType === 'percent') {
+                fringeTotal = laborTotal * ((item.fringeRate || 0) / 100);
+            } else if (item.fringeType === 'flat') {
+                fringeTotal = (item.fringeRate || 0) * totalWeeks * (item.num || 0);
+            } else if (item.fringeType === 'capped' && category === "Box Rentals") {
+                fringeTotal = Math.min(laborTotal * 0.25, item.fringeRate || 0);
+            }
+        }
+        
+        total += laborTotal + fringeTotal;
+    });
+    
+    return total;
+}
+    function showAddLaborModal(category = 'Post-Production Staff') {
         const modal = document.getElementById('add-labor-modal');
         if (!modal) {
             console.error('Add labor modal not found in DOM');
@@ -4000,26 +4194,33 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
         }
         
         modal.style.display = 'flex';
+        modal.dataset.category = category; // Store the category
         
-        // Clear all previous values and reset to defaults
+        // Update modal title
+        const modalTitle = modal.querySelector('.modal-header h2');
+        if (modalTitle) {
+            modalTitle.textContent = `Add ${category.replace(' Staff', '')} Member`;
+        }
+        
+        // Clear all previous values
         document.getElementById('new-labor-desc').value = '';
-        document.getElementById('new-labor-qty').value = '1';
-        document.getElementById('new-labor-rate').value = '0';
+        document.getElementById('new-labor-num').value = '1';
         document.getElementById('new-labor-prep').value = '0';
         document.getElementById('new-labor-shoot').value = '0';
         document.getElementById('new-labor-post').value = '0';
         document.getElementById('new-labor-wrap').value = '0';
+        document.getElementById('new-labor-rate').value = '';
         document.getElementById('new-labor-fringe-type').value = 'percent';
-        document.getElementById('new-labor-fringe-rate').value = '25';
-        document.getElementById('create-room').checked = true;
-        document.getElementById('create-equipment').checked = true;
-        document.getElementById('create-box-rental').checked = true;
+        document.getElementById('new-labor-fringe-rate').value = '';
         
         // Confirm button handler
         document.getElementById('confirm-add-labor').onclick = () => {
+            // Get the category from the modal's dataset
+            const targetCategory = modal.dataset.category;
+            
             // Gather all the input values
             const desc = document.getElementById('new-labor-desc').value.trim() || 'New Crew Member';
-            const qty = parseFloat(document.getElementById('new-labor-qty').value) || 1;
+            const qty = parseFloat(document.getElementById('new-labor-num').value) || 1;
             const rate = parseFloat(document.getElementById('new-labor-rate').value) || 0;
             const prep = parseFloat(document.getElementById('new-labor-prep').value) || 0;
             const shoot = parseFloat(document.getElementById('new-labor-shoot').value) || 0;
@@ -4028,9 +4229,10 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
             const fringeType = document.getElementById('new-labor-fringe-type').value || 'percent';
             const fringeRate = parseFloat(document.getElementById('new-labor-fringe-rate').value) || 0;
             
-            // Create the labor item with all values
+            // Create the labor item with a unique ID that includes the category
+            const laborId = `${targetCategory.toLowerCase().replace(/\s+/g, '-')}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             const laborItem = {
-                id: generateUUID(),
+                id: laborId,
                 desc: desc,
                 num: qty,
                 prep: prep,
@@ -4042,80 +4244,94 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                 fringeRate: fringeRate
             };
             
-            // Add to budget data
-            if (!budgetData['Labor']) {
-                budgetData['Labor'] = [];
+            // Add to the correct staff category in budget data
+            if (!budgetData[targetCategory]) {
+                budgetData[targetCategory] = [];
             }
-            budgetData['Labor'].push(laborItem);
+            budgetData[targetCategory].push(laborItem);
             
-            // Create related items if checkboxes are checked
-            if (document.getElementById('create-room').checked) {
-                if (!budgetData['Rooms']) {
-                    budgetData['Rooms'] = [];
-                }
-                budgetData['Rooms'].push({
-                    id: generateUUID(),
-                    desc: `${desc} Room`,
-                    num: qty,
-                    prep: prep,
-                    shoot: shoot,
-                    post: post,
-                    wrap: wrap,
-                    rate: 0, // User can set this later
-                    laborRef: laborItem.id
-                });
-            }
-            
-            if (document.getElementById('create-equipment').checked) {
-                if (!budgetData['Equipment Rentals']) {
-                    budgetData['Equipment Rentals'] = [];
-                }
-                budgetData['Equipment Rentals'].push({
-                    id: generateUUID(),
-                    desc: `${desc} Equipment`,
-                    num: qty,
-                    prep: prep,
-                    shoot: shoot,
-                    post: post,
-                    wrap: wrap,
-                    rate: 0, // User can set this later
-                    laborRef: laborItem.id
-                });
-            }
-            
-            if (document.getElementById('create-box-rental').checked) {
-                if (!budgetData['Box Rentals']) {
-                    budgetData['Box Rentals'] = [];
-                }
-                budgetData['Box Rentals'].push({
-                    id: generateUUID(),
-                    desc: `${desc} Box Rental`,
-                    num: qty,
-                    prep: prep,
-                    shoot: shoot,
-                    post: post,
-                    wrap: wrap,
-                    rate: 0, // User can set this later
-                    fringeType: 'none',
-                    fringeRate: 0,
-                    laborRef: laborItem.id
-                });
-            }
+
+// Create related items if checkboxes are checked
+if (document.getElementById('create-room') && document.getElementById('create-room').checked) {
+    const roomRate = parseFloat(document.getElementById('room-rate').value) || 400;
+    if (!budgetData['Rooms']) {
+        budgetData['Rooms'] = [];
+    }
+    budgetData['Rooms'].push({
+        id: `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        desc: `${desc} Room`,
+        num: qty,
+        prep: prep,
+        shoot: shoot,
+        post: post,
+        wrap: wrap,
+        rate: roomRate, // Use the editable rate
+        laborRef: laborId,
+        laborCategory: targetCategory
+    });
+}
+
+if (document.getElementById('create-equipment') && document.getElementById('create-equipment').checked) {
+    const equipmentRate = parseFloat(document.getElementById('equipment-rate').value) || 650;
+    if (!budgetData['Equipment Rentals']) {
+        budgetData['Equipment Rentals'] = [];
+    }
+    budgetData['Equipment Rentals'].push({
+        id: `equipment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        desc: desc.toLowerCase().includes('editor') ? `AVID Rental (${desc})` : `${desc} Equipment`,
+        num: qty,
+        prep: prep,
+        shoot: shoot,
+        post: post,
+        wrap: wrap,
+        rate: equipmentRate, // Use the editable rate
+        laborRef: laborId,
+        laborCategory: targetCategory
+    });
+}
+
+if (document.getElementById('create-box-rental') && document.getElementById('create-box-rental').checked) {
+    const boxRate = parseFloat(document.getElementById('box-rate').value) || 50;
+    if (!budgetData['Box Rentals']) {
+        budgetData['Box Rentals'] = [];
+    }
+    budgetData['Box Rentals'].push({
+        id: `box_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        desc: `Box Rental (${desc})`,
+        num: qty,
+        prep: prep,
+        shoot: shoot,
+        post: post,
+        wrap: wrap,
+        rate: boxRate, // Use the editable rate
+        fringeType: 'capped',
+        fringeRate: 500,
+        laborRef: laborId,
+        laborCategory: targetCategory
+    });
+}
             
             // Close modal and re-render
             modal.style.display = 'none';
             renderBudgetView();
+            calculateBudgetTotals(); // Recalculate totals
         };
         
         // Cancel button handler
-        document.getElementById('cancel-add-labor').onclick = () => {
-            modal.style.display = 'none';
-        };
+        const cancelBtn = document.getElementById('cancel-add-labor');
+        if (cancelBtn) {
+            cancelBtn.onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
         
         // Close X button handler
-        document.getElementById('add-labor-modal-close').onclick = () => {
-            modal.style.display = 'none';
-        };
+        const closeBtn = document.getElementById('add-labor-modal-close');
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
         
         // Click outside modal to close
         modal.onclick = (e) => {
@@ -4902,6 +5118,11 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
     function setupBudgetEventDelegation() {
         const container = document.getElementById('budget-view');
         if (!container) return;
+
+         // Check if we already have listeners attached to avoid duplicates
+    if (container.dataset.hasListeners === 'true') {
+        return;
+    }
         
         // Use event delegation - attach once to the container
         container.addEventListener('input', (e) => {
@@ -4922,6 +5143,7 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                         
                         // Handle syncing for labor items
                         if (category === 'Labor' && ['prep', 'shoot', 'post', 'wrap', 'num'].includes(field)) {
+                            console.log('Labor field changed:', field, 'for item:', id);
                             syncLaborWeeksToRelatedItems(id);
                         }
                         
@@ -4931,6 +5153,89 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
                 }
             }
         });
+        
+        // Add click event delegation for buttons
+        container.addEventListener('click', (e) => {
+            // Handle delete buttons
+            if (e.target.classList.contains('delete-line-item-btn')) {
+                const id = e.target.dataset.id;
+                
+                // Find the item and its category
+                for (let category in budgetData) {
+                    const itemIndex = budgetData[category].findIndex(item => item.id === id);
+                    if (itemIndex !== -1) {
+                        const item = budgetData[category][itemIndex];
+                        
+                        // If it's a labor item, check for related items
+                        if (category === 'Labor') {
+                            const relatedItems = [];
+                            
+                            // Find related items
+                            ['Rooms', 'Equipment Rentals', 'Box Rentals'].forEach(cat => {
+                                if (budgetData[cat]) {
+                                    const related = budgetData[cat].filter(i => i.laborRef === id);
+                                    related.forEach(r => relatedItems.push({category: cat, item: r}));
+                                }
+                            });
+                            
+                            if (relatedItems.length > 0) {
+                                const relatedNames = relatedItems.map(r => `${r.item.desc} (${r.category})`).join('\n');
+                                if (confirm(`This will also delete the following related items:\n\n${relatedNames}\n\nContinue?`)) {
+                                    // Delete related items
+                                    relatedItems.forEach(r => {
+                                        budgetData[r.category] = budgetData[r.category].filter(i => i.id !== r.item.id);
+                                    });
+                                } else {
+                                    return; // Cancel deletion
+                                }
+                            }
+                        }
+                        
+                        // Delete the item
+                        budgetData[category].splice(itemIndex, 1);
+                        renderBudgetView();
+                        break;
+                    }
+                }
+            }
+            
+            // Handle add line item buttons
+            if (e.target.classList.contains('add-line-item-btn')) {
+                const category = e.target.dataset.category;
+                
+                if (category === 'Labor') {
+                    // Use the modal for labor items
+                    showAddLaborModal();
+                } else {
+                    // For non-labor categories, add a simple item
+                    const newItem = {
+                        id: generateUUID(),
+                        desc: 'New Item',
+                        num: 1,
+                        prep: 0,
+                        shoot: 0,
+                        post: 0,
+                        wrap: 0,
+                        rate: 0
+                    };
+                    
+                    // Add category-specific fields
+                    if (category === 'Box Rentals') {
+                        newItem.fringeType = 'capped';
+                        newItem.fringeRate = 0;
+                    } else if (category !== 'Rooms' && category !== 'Equipment Rentals') {
+                        newItem.fringeType = 'percent';
+                        newItem.fringeRate = 25;
+                    }
+                    
+                    budgetData[category].push(newItem);
+                    renderBudgetView();
+                }
+            }
+        });
+
+        // Mark container as having listeners to prevent duplicates
+        container.dataset.hasListeners = 'true';
     }
 
     function updateBudgetForEditorCount() {
@@ -4976,353 +5281,563 @@ document.getElementById('waterfall-container').addEventListener('mousedown', onM
             }
         }
     }
-
-    function renderBudgetView() {
-        const container = document.getElementById('budget-view');
-        if (!container) return;
+    function renderBudgetItem(tbody, item, category, isLabor) {
+        const row = document.createElement('tr');
+        row.dataset.id = item.id;
         
-        container.innerHTML = '';
-
-        for (const category in budgetData) {
-            const table = document.createElement('table');
-            table.className = 'budget-category-table';
-
-            let headerHTML, subtotalColspan;
-            if (category === "Rooms" || category === "Equipment Rentals") {
-                headerHTML = `<tr><th style="width: 35%;">Description</th><th style="width: 8%;">Num</th><th style="width: 8%;">Prep</th><th style="width: 8%;">Shoot</th><th style="width: 8%;">Post</th><th style="width: 8%;">Wrap</th><th style="width: 10%;">Total Wks</th><th style="width: 10%;">Rate</th><th style="width: 12%;">Total</th><th style="width: 3%;"></th></tr>`;
-                subtotalColspan = 8;
-            } else if (category === "Box Rentals") {
-                headerHTML = `<tr><th style="width: 25%;">Description</th><th style="width: 5%;">Num</th><th style="width: 5%;">Prep</th><th style="width: 5%;">Shoot</th><th style="width: 5%;">Post</th><th style="width: 5%;">Wrap</th><th style="width: 8%;">Total Wks</th><th style="width: 8%;">Rate</th><th style="width: 15%;">Capped?</th><th style="width: 11%;">Total</th><th style="width: 3%;"></th></tr>`;
-                subtotalColspan = 9;
-            } else {
-                headerHTML = `<tr><th style="width: 20%;">Description</th><th style="width: 5%;">Num</th><th style="width: 5%;">Prep</th><th style="width: 5%;">Shoot</th><th style="width: 5%;">Post</th><th style="width: 5%;">Wrap</th><th style="width: 7%;">Total Wks</th><th style="width: 8%;">Rate</th><th style="width: 15%;">Fringes</th><th style="width: 8%;">Labor Total</th><th style="width: 8%;">Fringe Total</th><th style="width: 9%;">Total</th><th style="width: 3%;"></th></tr>`;
-                subtotalColspan = 11;
-            }
-
-            let tableHTML = `<thead><tr><th colspan="${subtotalColspan + 2}"><h2>${category}</h2></th></tr>${headerHTML}</thead><tbody>`;
-
-            budgetData[category].forEach(item => {
-                tableHTML += `<tr data-id="${item.id}">
-                    <td><input type="text" id="budget-desc-${item.id}" value="${item.desc}" class="budget-input"></td>
-                    <td><input type="number" id="budget-num-${item.id}" value="${item.num}" class="budget-input"></td>
-                    <td><input type="number" id="budget-prep-${item.id}" value="${item.prep}" class="budget-input"></td>
-                    <td><input type="number" id="budget-shoot-${item.id}" value="${item.shoot.toFixed(2)}" class="budget-input"></td>
-                    <td><input type="number" id="budget-post-${item.id}" value="${item.post.toFixed(2)}" class="budget-input"></td>
-                    <td><input type="number" id="budget-wrap-${item.id}" value="${item.wrap}" class="budget-input"></td>
-                    <td id="budget-total-weeks-${item.id}"></td>
-                    <td><input type="number" id="budget-rate-${item.id}" value="${item.rate}" class="budget-input"></td>`;
-
-                if (category === "Rooms" || category === "Equipment Rentals") {
-                     tableHTML += `<td id="budget-line-total-${item.id}"></td>`;
-                } else if (category === "Box Rentals") {
-                    tableHTML += `<td>
-                            <div class="fringe-group">
-                                <select id="budget-fringeType-${item.id}" class="budget-input">
-                                    <option value="capped" ${item.fringeType === 'capped' ? 'selected' : ''}>Yes</option>
-                                    <option value="none" ${item.fringeType !== 'capped' ? 'selected' : ''}>No</option>
-                                </select>
-                                <input type="number" id="budget-fringeRate-${item.id}" value="${item.fringeRate}" class="budget-input">
-                            </div>
-                        </td><td id="budget-line-total-${item.id}"></td>`;
-                } else {
-                    tableHTML += `<td>
-                            <div class="fringe-group">
-                                <select id="budget-fringeType-${item.id}" class="budget-input">
-                                    <option value="percent" ${item.fringeType === 'percent' ? 'selected' : ''}>%</option>
-                                    <option value="flat" ${item.fringeType === 'flat' ? 'selected' : ''}>$</option>
-                                </select>
-                                <input type="number" id="budget-fringeRate-${item.id}" value="${item.fringeRate}" class="budget-input">
-                            </div>
-                        </td>
-                        <td id="budget-labor-total-${item.id}"></td>
-                        <td id="budget-fringe-total-${item.id}"></td>
-                        <td id="budget-line-total-${item.id}"></td>`;
-                }
-                tableHTML += `<td><button class="delete-button delete-line-item-btn" data-id="${item.id}">&times;</button></td></tr>`;
-            });
-
-            tableHTML += `</tbody><tfoot><tr>
-                    <td colspan="${subtotalColspan}" class="subtotal">Subtotal</td>
-                    <td id="subtotal-${category.replace(/\s+/g, '-')}" class="subtotal"></td>
-                    <td></td>
-                </tr></tfoot>`;
-            table.innerHTML = tableHTML;
-            container.appendChild(table);
-            const addBtn = document.createElement('button');
-            addBtn.textContent = `+ Add Line Item to ${category}`;
-            addBtn.className = 'primary-action add-line-item-btn';
-            addBtn.dataset.category = category;
-            container.appendChild(addBtn);
+        if (isLabor) {
+            // Staff category row format
+            row.innerHTML = `
+                <td><input type="text" class="budget-input" id="budget-desc-${item.id}" value="${item.desc || ''}" /></td>
+                <td><input type="number" class="budget-input" id="budget-num-${item.id}" value="${item.num || 1}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-prep-${item.id}" value="${item.prep || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-shoot-${item.id}" value="${item.shoot || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-post-${item.id}" value="${item.post || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-wrap-${item.id}" value="${item.wrap || 0}" min="0" step="0.5" /></td>
+                <td><span id="budget-total-weeks-${item.id}">${((item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0)).toFixed(2)}</span></td>
+                <td><input type="number" class="budget-input" id="budget-rate-${item.id}" value="${item.rate || 0}" min="0" step="50" /></td>
+                <td>
+                    <select class="budget-input" id="budget-fringeType-${item.id}">
+                        <option value="none" ${item.fringeType === 'none' ? 'selected' : ''}>None</option>
+                        <option value="percent" ${item.fringeType === 'percent' ? 'selected' : ''}>Percent</option>
+                        <option value="flat" ${item.fringeType === 'flat' ? 'selected' : ''}>Flat</option>
+                    </select>
+                </td>
+                <td><input type="number" class="budget-input" id="budget-fringeRate-${item.id}" value="${item.fringeRate || 0}" min="0" step="0.5" /></td>
+                <td><span id="budget-labor-total-${item.id}">$0.00</span></td>
+                <td><span id="budget-fringe-total-${item.id}">$0.00</span></td>
+                <td><span id="budget-line-total-${item.id}">$0.00</span></td>
+                <td><button class="delete-budget-item" data-id="${item.id}" data-category="${category}">Delete</button></td>
+            `;
+        } else if (category === "Rooms" || category === "Equipment Rentals") {
+            row.innerHTML = `
+                <td><input type="text" class="budget-input" id="budget-desc-${item.id}" value="${item.desc || ''}" /></td>
+                <td><input type="number" class="budget-input" id="budget-num-${item.id}" value="${item.num || 1}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-prep-${item.id}" value="${item.prep || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-shoot-${item.id}" value="${item.shoot || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-post-${item.id}" value="${item.post || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-wrap-${item.id}" value="${item.wrap || 0}" min="0" step="0.5" /></td>
+                <td><span id="budget-total-weeks-${item.id}">${((item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0)).toFixed(2)}</span></td>
+                <td><input type="number" class="budget-input" id="budget-rate-${item.id}" value="${item.rate || 0}" min="0" step="50" /></td>
+                <td><span id="budget-line-total-${item.id}">$0.00</span></td>
+                <td><button class="delete-budget-item" data-id="${item.id}" data-category="${category}">Delete</button></td>
+            `;
+        } else if (category === "Box Rentals") {
+            row.innerHTML = `
+                <td><input type="text" class="budget-input" id="budget-desc-${item.id}" value="${item.desc || ''}" /></td>
+                <td><input type="number" class="budget-input" id="budget-num-${item.id}" value="${item.num || 1}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-prep-${item.id}" value="${item.prep || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-shoot-${item.id}" value="${item.shoot || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-post-${item.id}" value="${item.post || 0}" min="0" step="0.5" /></td>
+                <td><input type="number" class="budget-input" id="budget-wrap-${item.id}" value="${item.wrap || 0}" min="0" step="0.5" /></td>
+                <td><span id="budget-total-weeks-${item.id}">${((item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0)).toFixed(2)}</span></td>
+                <td><input type="number" class="budget-input" id="budget-rate-${item.id}" value="${item.rate || 0}" min="0" step="50" /></td>
+                <td>
+                    <select class="budget-input" id="budget-fringeType-${item.id}">
+                        <option value="none" ${item.fringeType === 'none' ? 'selected' : ''}>None</option>
+                        <option value="capped" ${item.fringeType === 'capped' ? 'selected' : ''}>Capped</option>
+                    </select>
+                </td>
+                <td><input type="number" class="budget-input" id="budget-fringeRate-${item.id}" value="${item.fringeRate || 0}" min="0" step="50" /></td>
+                <td><span id="budget-line-total-${item.id}">$0.00</span></td>
+                <td><button class="delete-budget-item" data-id="${item.id}" data-category="${category}">Delete</button></td>
+            `;
         }
-        const grandTotalEl = document.createElement('div');
-        grandTotalEl.innerHTML = `<h2>Grand Total: <span id="grand-total" class="grand-total">$0.00</span></h2>`;
-        container.appendChild(grandTotalEl);
-
-        addBudgetEventListeners();
-        calculateBudgetTotals();
+        
+        tbody.appendChild(row);
+        
+        // Add event listeners for this row
+        row.querySelectorAll('.budget-input').forEach(input => {
+            input.addEventListener('input', (e) => {
+                const id = item.id;
+                const field = e.target.id.split('-')[1];
+                
+                // Update the item in budgetData
+                if (field === 'desc') {
+                    item.desc = e.target.value;
+                } else if (field === 'fringeType') {
+                    item.fringeType = e.target.value;
+                } else {
+                    item[field] = parseFloat(e.target.value) || 0;
+                }
+                
+                // Recalculate totals
+                calculateBudgetTotals();
+            });
+        });
+        
+        // Add delete button listener
+        const deleteBtn = row.querySelector('.delete-budget-item');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', (e) => {
+                const itemId = e.target.dataset.id;
+                const itemCategory = e.target.dataset.category;
+                
+                if (confirm(`Are you sure you want to delete this item?`)) {
+                    // Remove from budgetData
+                    if (budgetData[itemCategory]) {
+                        budgetData[itemCategory] = budgetData[itemCategory].filter(i => i.id !== itemId);
+                    }
+                    
+                    // Re-render the budget view
+                    renderBudgetView();
+                }
+            });
+        }
     }
+    function renderBudgetView() {
+        
+        const budgetView = document.getElementById('budget-view');
+        budgetView.innerHTML = '';
+        
+        const budgetContent = document.createElement('div');
+        budgetContent.className = 'budget-content';
+        
+        // Use EXACT category names from loadDefaults
+        const categories = [
+            { key: "Post-Production Staff", displayName: "Post-Production Staff", isLabor: true },
+            { key: "Editorial Staff", displayName: "Editorial Staff", isLabor: true },
+            { key: "VFX Staff", displayName: "VFX Staff", isLabor: true },
+            { key: "Rooms", displayName: "Rooms", isLabor: false },
+            { key: "Equipment Rentals", displayName: "Equipment Rentals", isLabor: false },
+            { key: "Box Rentals", displayName: "Box Rentals", isLabor: false }
+        ];
+        
+        // Rest of the function remains the same...
+        categories.forEach(({ key, displayName, isLabor }) => {
+            const categorySection = document.createElement('div');
+            categorySection.className = 'budget-category-table';
+            categorySection.dataset.category = key;
+            
+            const categoryHeader = document.createElement('div');
+            categoryHeader.className = 'budget-category-header';
+            categoryHeader.innerHTML = `
+                <h2>${displayName}</h2>
+                <div class="category-controls">
+                    ${isLabor ? `<button class="add-labor-btn" data-category="${key}">+ Add ${displayName.replace(' Staff', '')}</button>` : ''}
+                    <span class="category-subtotal" id="subtotal-${key.replace(/\s+/g, '-')}">$0.00</span>
+                </div>
+            `;
+            categorySection.appendChild(categoryHeader);
+            
+            const table = document.createElement('table');
+            table.className = 'budget-table';
+            table.id = `budget-table-${key.replace(/\s+/g, '-')}`;
+            
+            const thead = document.createElement('thead');
+            if (isLabor) {
+                thead.innerHTML = `
+                    <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Prep</th>
+                        <th>Shoot</th>
+                        <th>Post</th>
+                        <th>Wrap</th>
+                        <th>Total Weeks</th>
+                        <th>Rate</th>
+                        <th>Fringe Type</th>
+                        <th>Fringe Rate</th>
+                        <th>Labor Total</th>
+                        <th>Fringe Total</th>
+                        <th>Total</th>
+                        <th></th>
+                    </tr>
+                `;
+            } else if (key === "Rooms" || key === "Equipment Rentals") {
+                thead.innerHTML = `
+                    <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Prep</th>
+                        <th>Shoot</th>
+                        <th>Post</th>
+                        <th>Wrap</th>
+                        <th>Total Weeks</th>
+                        <th>Rate</th>
+                        <th>Total</th>
+                        <th></th>
+                    </tr>
+                `;
+            } else if (key === "Box Rentals") {
+                thead.innerHTML = `
+                    <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th>Prep</th>
+                        <th>Shoot</th>
+                        <th>Post</th>
+                        <th>Wrap</th>
+                        <th>Total Weeks</th>
+                        <th>Rate</th>
+                        <th>Fringe Capped</th>
+                        <th>Fringe Cap</th>
+                        <th>Total</th>
+                        <th></th>
+                    </tr>
+                `;
+            }
+            
+            table.appendChild(thead);
+            
+            const tbody = document.createElement('tbody');
+            tbody.id = `budget-tbody-${key.replace(/\s+/g, '-')}`;
+            
+            // Render existing items from budgetData
+            if (budgetData && budgetData[key] && budgetData[key].length > 0) {
+                budgetData[key].forEach(item => {
+                    renderBudgetItem(tbody, item, key, isLabor);
+                });
+            }
+            
+            table.appendChild(tbody);
+            categorySection.appendChild(table);
+            budgetContent.appendChild(categorySection);
+        });
+        
+        // Add grand total
+        const grandTotalSection = document.createElement('div');
+        grandTotalSection.className = 'budget-grand-total';
+        grandTotalSection.innerHTML = `
+            <h3>Grand Total</h3>
+            <span id="grand-total">$0.00</span>
+        `;
+        budgetContent.appendChild(grandTotalSection);
+        
+        budgetView.appendChild(budgetContent);
+        
+        // Add event listeners
+        document.querySelectorAll('.add-labor-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const category = e.target.dataset.category;
+                showAddLaborModal(category);
+            });
+        });
+        
+        // Calculate totals after DOM is ready
+        setTimeout(() => {
+            calculateBudgetTotals();
+        }, 100);
+    }
+    
 
     function calculateBudgetTotals() {
+        if (!budgetData || Object.keys(budgetData).length === 0) {
+            return;
+        }
+        
         let grandTotal = 0;
         const currencyFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-
+        
+        // Use EXACT category names
+        const staffCategories = ["Post-Production Staff", "Editorial Staff", "VFX Staff"];
+    
         document.querySelectorAll('.budget-category-table').forEach(table => {
             let categorySubtotal = 0;
-            const categoryName = table.querySelector('h2').textContent;
+            const categoryHeader = table.querySelector('h2');
+            if (!categoryHeader) return;
+            
+            const categoryName = categoryHeader.textContent;
             const categoryKey = categoryName.replace(/\s+/g, '-');
-
+            const isStaffCategory = staffCategories.includes(categoryName);
+    
             table.querySelectorAll('tbody tr').forEach(row => {
                 const id = row.dataset.id;
                 if (!id) return;
-
-                const num = parseFloat(document.getElementById(`budget-num-${id}`).value) || 0;
-                const prep = parseFloat(document.getElementById(`budget-prep-${id}`).value) || 0;
-                const shoot = parseFloat(document.getElementById(`budget-shoot-${id}`).value) || 0;
-                const post = parseFloat(document.getElementById(`budget-post-${id}`).value) || 0;
-                const wrap = parseFloat(document.getElementById(`budget-wrap-${id}`).value) || 0;
-                const rate = parseFloat(document.getElementById(`budget-rate-${id}`).value) || 0;
-
+    
+                // Check if elements exist before trying to read their values
+                const numEl = document.getElementById(`budget-num-${id}`);
+                const prepEl = document.getElementById(`budget-prep-${id}`);
+                const shootEl = document.getElementById(`budget-shoot-${id}`);
+                const postEl = document.getElementById(`budget-post-${id}`);
+                const wrapEl = document.getElementById(`budget-wrap-${id}`);
+                const rateEl = document.getElementById(`budget-rate-${id}`);
+                
+                if (!numEl || !prepEl || !shootEl || !postEl || !wrapEl || !rateEl) {
+                    return; // Skip if any required element is missing
+                }
+    
+                const num = parseFloat(numEl.value) || 0;
+                const prep = parseFloat(prepEl.value) || 0;
+                const shoot = parseFloat(shootEl.value) || 0;
+                const post = parseFloat(postEl.value) || 0;
+                const wrap = parseFloat(wrapEl.value) || 0;
+                const rate = parseFloat(rateEl.value) || 0;
+    
                 const totalWeeks = prep + shoot + post + wrap;
                 const laborTotal = num * totalWeeks * rate;
                 let fringeTotal = 0;
                 let lineTotal = 0;
-
-                if(categoryName === "Rooms" || categoryName === "Equipment Rentals") {
+    
+                if (categoryName === "Rooms" || categoryName === "Equipment Rentals") {
+                    // Rooms and Equipment Rentals don't have fringe
                     lineTotal = laborTotal;
-                } else {
-                    const fringeType = document.getElementById(`budget-fringeType-${id}`).value;
-                    const fringeRate = parseFloat(document.getElementById(`budget-fringeRate-${id}`).value) || 0;
-                    if (fringeType === 'percent') {
-                        fringeTotal = laborTotal * (fringeRate / 100);
-                    } else if (fringeType === 'flat') {
-                        fringeTotal = num * totalWeeks * fringeRate;
-                    } else if (fringeType === 'capped') {
-                        const cap = fringeRate;
-                        fringeTotal = Math.min(laborTotal, cap * num);
+                } else if (isStaffCategory || categoryName === "Box Rentals") {
+                    // Staff categories and Box Rentals have fringe calculations
+                    const fringeTypeEl = document.getElementById(`budget-fringeType-${id}`);
+                    const fringeRateEl = document.getElementById(`budget-fringeRate-${id}`);
+                    
+                    if (fringeTypeEl && fringeRateEl) {
+                        const fringeType = fringeTypeEl.value;
+                        const fringeRate = parseFloat(fringeRateEl.value) || 0;
+                        
+                        if (fringeType === 'percent') {
+                            fringeTotal = laborTotal * (fringeRate / 100);
+                        } else if (fringeType === 'flat') {
+                            fringeTotal = num * totalWeeks * fringeRate;
+                        } else if (fringeType === 'capped') {
+                            const cap = fringeRate;
+                            fringeTotal = Math.min(laborTotal * 0.25, cap * num);
+                        }
                     }
-                    lineTotal = laborTotal + fringeTotal;
-
-                    if(categoryName === "Box Rentals") {
-                         lineTotal = fringeType === 'capped' ? fringeTotal : laborTotal;
+                    
+                    // Calculate line total differently for Box Rentals vs Staff categories
+                    if (categoryName === "Box Rentals") {
+                        const fringeTypeEl = document.getElementById(`budget-fringeType-${id}`);
+                        if (fringeTypeEl && fringeTypeEl.value === 'capped') {
+                            // For capped box rentals, add the capped fringe to labor total
+                            lineTotal = laborTotal + fringeTotal;
+                        } else {
+                            lineTotal = laborTotal;
+                        }
+                    } else if (isStaffCategory) {
+                        // For staff categories, always add fringe to labor
+                        lineTotal = laborTotal + fringeTotal;
                     }
+                    
+                    // Update the labor and fringe total display elements
                     const laborTotalEl = document.getElementById(`budget-labor-total-${id}`);
                     const fringeTotalEl = document.getElementById(`budget-fringe-total-${id}`);
-                    if(laborTotalEl) laborTotalEl.textContent = currencyFormat.format(laborTotal);
-                    if(fringeTotalEl) fringeTotalEl.textContent = currencyFormat.format(fringeTotal);
+                    if (laborTotalEl) laborTotalEl.textContent = currencyFormat.format(laborTotal);
+                    if (fringeTotalEl) fringeTotalEl.textContent = currencyFormat.format(fringeTotal);
+                } else {
+                    // Any other categories (shouldn't happen with our defined categories)
+                    lineTotal = laborTotal;
                 }
-
-                document.getElementById(`budget-total-weeks-${id}`).textContent = totalWeeks.toFixed(2);
-                document.getElementById(`budget-line-total-${id}`).textContent = currencyFormat.format(lineTotal);
-
+    
+                // Safely update the total weeks and line total elements
+                const totalWeeksEl = document.getElementById(`budget-total-weeks-${id}`);
+                const lineTotalEl = document.getElementById(`budget-line-total-${id}`);
+                
+                if (totalWeeksEl) {
+                    totalWeeksEl.textContent = totalWeeks.toFixed(2);
+                }
+                if (lineTotalEl) {
+                    lineTotalEl.textContent = currencyFormat.format(lineTotal);
+                }
+    
                 categorySubtotal += lineTotal;
             });
-
-            document.getElementById(`subtotal-${categoryKey}`).textContent = currencyFormat.format(categorySubtotal);
+    
+            // Safely update subtotal
+            const subtotalEl = document.getElementById(`subtotal-${categoryKey}`);
+            if (subtotalEl) {
+                subtotalEl.textContent = currencyFormat.format(categorySubtotal);
+            }
+            
             grandTotal += categorySubtotal;
         });
-
-        document.getElementById('grand-total').textContent = currencyFormat.format(grandTotal);
+    
+        // Safely update grand total
+        const grandTotalEl = document.getElementById('grand-total');
+        if (grandTotalEl) {
+            grandTotalEl.textContent = currencyFormat.format(grandTotal);
+        }
     }
 
     function findBudgetItemById(id) {
-        for (let category in budgetData) {
-            const item = budgetData[category].find(item => item.id === id);
-            if (item) {
-                item.category = category; // Add category for reference
-                return item;
+        const allCategories = [
+            "Post-Production Staff", 
+            "Editorial Staff", 
+            "VFX Staff",
+            "Rooms", 
+            "Equipment Rentals", 
+            "Box Rentals"
+        ];
+        
+        for (let category of allCategories) {
+            if (budgetData[category]) {
+                const item = budgetData[category].find(item => item.id === id);
+                if (item) {
+                    item.category = category; // Add category for reference
+                    return item;
+                }
             }
         }
         return null;
     }
-
-    function addBudgetEventListeners() {
-        document.querySelectorAll('.budget-input').forEach(input => {
-            input.addEventListener('input', (e) => {
-                const id = e.target.id.split('-')[2];
-                const field = e.target.id.split('-')[1];
-                const item = findBudgetItemById(id);
-                
-                if (item) {
-                    item[field] = e.target.type === 'number' ? 
-                        parseFloat(e.target.value) || 0 : e.target.value;
-                    
-                    // If this is a Labor item and weeks changed, sync to related items
-                    if (item.category === 'Labor' && 
-                        ['prep', 'shoot', 'post', 'wrap'].includes(field)) {
-                        syncLaborWeeksToRelatedItems(id);
-                    }
-                }
-                
-                calculateBudgetTotals();
-            });
-        });
-
-        // Inside addBudgetEventListeners function, replace the add-line-item-btn handler with:
-document.querySelectorAll('.add-line-item-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        const category = e.target.dataset.category;
-        
-        if (category === 'Labor') {
-            // Use the modal for labor items
-            showAddLaborModal();
-        } else {
-            // Regular inline add for other categories
-            const newItem = {
-                id: generateUUID(),
-                desc: 'New Item',
-                num: 1,
-                prep: 0,
-                shoot: 0,
-                post: 0,
-                wrap: 0,
-                rate: 0
-            };
-            
-            // Add category-specific fields
-            if (category === 'Box Rentals') {
-                newItem.fringeType = 'none';
-                newItem.fringeRate = 0;
-            } else if (category === 'Fabrication') {
-                newItem.fringeType = 'percent';
-                newItem.fringeRate = 25;
-            }
-            
-            budgetData[category].push(newItem);
-            renderBudgetView();
-        }
-    });
-});    
-                
-         document.querySelectorAll('.delete-line-item-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = e.target.dataset.id;
-                const category = e.target.closest('.budget-category-table').querySelector('h2').textContent;
-                budgetData[category] = budgetData[category].filter(item => item.id !== id);
-                renderBudgetView();
-            });
-        });
-    }
-    function autoGenerateCrewRelatedItems(laborItem) {
-        const crewName = laborItem.desc;
-        const laborId = laborItem.id;
-        
-        // Check if related items already exist
-        const roomExists = budgetData['Rooms'].some(item => 
-            item.desc.toLowerCase() === `${crewName.toLowerCase()} room` ||
-            item.laborRef === laborId
-        );
-        
-        if (!roomExists) {
-            // Add Room
-            budgetData['Rooms'].push({
-                id: generateUUID(),
-                desc: `${crewName} Room`,
-                num: laborItem.num || 1,
-                prep: 0,  // Will be linked to labor
-                shoot: 0, // Will be linked to labor
-                post: 0,  // Will be linked to labor
-                wrap: 0,  // Will be linked to labor
-                rate: 0,  // User can fill in later
-                laborRef: laborId  // Link to labor item
-            });
-            
-            // Add Equipment
-            budgetData['Equipment Rentals'].push({
-                id: generateUUID(),
-                desc: `${crewName} Equipment`,
-                num: laborItem.num || 1,
-                prep: 0,
-                shoot: 0,
-                post: 0,
-                wrap: 0,
-                rate: 0,
-                laborRef: laborId
-            });
-            
-            // Add Box Rental
-            budgetData['Box Rentals'].push({
-                id: generateUUID(),
-                desc: `${crewName} Box Rental`,
-                num: laborItem.num || 1,
-                prep: 0,
-                shoot: 0,
-                post: 0,
-                wrap: 0,
-                rate: 0,
-                fringeType: 'none',
-                fringeRate: 0,
-                laborRef: laborId
-            });
-        }
-    }
     
     // Function to sync weeks from labor to related items
     function syncLaborWeeksToRelatedItems(laborId) {
-        const laborItem = budgetData['Labor'].find(item => item.id === laborId);
+        const laborItem = budgetData['Labor'] ? budgetData['Labor'].find(item => item.id === laborId) : null;
         if (!laborItem) return;
         
+        console.log('Syncing labor weeks for:', laborItem.desc, laborId);
+        
         // Update Rooms
-        budgetData['Rooms'].forEach(item => {
-            if (item.laborRef === laborId) {
-                item.prep = laborItem.prep;
-                item.shoot = laborItem.shoot;
-                item.post = laborItem.post;
-                item.wrap = laborItem.wrap;
-            }
-        });
+        if (budgetData['Rooms']) {
+            budgetData['Rooms'].forEach(item => {
+                if (item.laborRef === laborId) {
+                    console.log('Updating room:', item.desc);
+                    item.num = laborItem.num;
+                    item.prep = laborItem.prep;
+                    item.shoot = laborItem.shoot;
+                    item.post = laborItem.post;
+                    item.wrap = laborItem.wrap;
+                    // Update the DOM directly if the element exists
+                    const numEl = document.getElementById(`budget-num-${item.id}`);
+                    const prepEl = document.getElementById(`budget-prep-${item.id}`);
+                    const shootEl = document.getElementById(`budget-shoot-${item.id}`);
+                    const postEl = document.getElementById(`budget-post-${item.id}`);
+                    const wrapEl = document.getElementById(`budget-wrap-${item.id}`);
+                    
+                    if (numEl) numEl.value = laborItem.num;
+                    if (prepEl) prepEl.value = laborItem.prep;
+                    if (shootEl) shootEl.value = laborItem.shoot.toFixed(2);
+                    if (postEl) postEl.value = laborItem.post.toFixed(2);
+                    if (wrapEl) wrapEl.value = laborItem.wrap;
+                }
+            });
+        }
         
         // Update Equipment Rentals
-        budgetData['Equipment Rentals'].forEach(item => {
-            if (item.laborRef === laborId) {
-                item.prep = laborItem.prep;
-                item.shoot = laborItem.shoot;
-                item.post = laborItem.post;
-                item.wrap = laborItem.wrap;
-            }
-        });
+        if (budgetData['Equipment Rentals']) {
+            budgetData['Equipment Rentals'].forEach(item => {
+                if (item.laborRef === laborId) {
+                    console.log('Updating equipment:', item.desc);
+                    item.num = laborItem.num;
+                    item.prep = laborItem.prep;
+                    item.shoot = laborItem.shoot;
+                    item.post = laborItem.post;
+                    item.wrap = laborItem.wrap;
+                    // Update the DOM directly
+                    const numEl = document.getElementById(`budget-num-${item.id}`);
+                    const prepEl = document.getElementById(`budget-prep-${item.id}`);
+                    const shootEl = document.getElementById(`budget-shoot-${item.id}`);
+                    const postEl = document.getElementById(`budget-post-${item.id}`);
+                    const wrapEl = document.getElementById(`budget-wrap-${item.id}`);
+                    
+                    if (numEl) numEl.value = laborItem.num;
+                    if (prepEl) prepEl.value = laborItem.prep;
+                    if (shootEl) shootEl.value = laborItem.shoot.toFixed(2);
+                    if (postEl) postEl.value = laborItem.post.toFixed(2);
+                    if (wrapEl) wrapEl.value = laborItem.wrap;
+                }
+            });
+        }
         
         // Update Box Rentals
-        budgetData['Box Rentals'].forEach(item => {
-            if (item.laborRef === laborId) {
-                item.prep = laborItem.prep;
-                item.shoot = laborItem.shoot;
-                item.post = laborItem.post;
-                item.wrap = laborItem.wrap;
-            }
-        });
+        if (budgetData['Box Rentals']) {
+            budgetData['Box Rentals'].forEach(item => {
+                if (item.laborRef === laborId) {
+                    console.log('Updating box rental:', item.desc);
+                    item.num = laborItem.num;
+                    item.prep = laborItem.prep;
+                    item.shoot = laborItem.shoot;
+                    item.post = laborItem.post;
+                    item.wrap = laborItem.wrap;
+                    // Update the DOM directly
+                    const numEl = document.getElementById(`budget-num-${item.id}`);
+                    const prepEl = document.getElementById(`budget-prep-${item.id}`);
+                    const shootEl = document.getElementById(`budget-shoot-${item.id}`);
+                    const postEl = document.getElementById(`budget-post-${item.id}`);
+                    const wrapEl = document.getElementById(`budget-wrap-${item.id}`);
+                    
+                    if (numEl) numEl.value = laborItem.num;
+                    if (prepEl) prepEl.value = laborItem.prep;
+                    if (shootEl) shootEl.value = laborItem.shoot.toFixed(2);
+                    if (postEl) postEl.value = laborItem.post.toFixed(2);
+                    if (wrapEl) wrapEl.value = laborItem.wrap;
+                }
+            });
+        }
+        
+        // Recalculate totals
+        calculateBudgetTotals();
     }
 
     function initializeApp() {
-        setupCollapsibleSections();
-        generateHolidaySelectors();
-        setupTabControls();
-        setupModal();
-        setupHiatusModal();
-        setupSixthDayModal();
-        setupColumnConfigModal();
-        loadDefaults('hour-long');
-        document.getElementById('app-Dr_g0n-container').innerHTML = AppDr_g0n;
+        console.log('Starting app initialization...');
         
-        setupAllEventListeners();
-        setupEnhancedInputListeners();
-        setupUnlinkToggleListener(); // ADD THIS LINE
-        setupBudgetEventDelegation();
-        
-        // Explicit handlers for the problematic checkboxes
-        document.getElementById('producers-cuts-overlap').addEventListener('change', (e) => {
-            setLastChangedInput(e.target.id);
-            handleInputChange(e.target);
-        });
-        
-        document.getElementById('producers-cuts-pre-wrap').addEventListener('change', (e) => {
-            setLastChangedInput(e.target.id);
-            handleInputChange(e.target);
-        });
-        
-        document.getElementById('toggle-sequential-lock').addEventListener('change', (e) => {
-            setLastChangedInput(e.target.id);
-            handleInputChange(e.target);
-        });
+        try {
+            setupCollapsibleSections();
+            console.log('✓ Collapsible sections setup');
+            
+            generateHolidaySelectors();
+            console.log('✓ Holiday selectors generated');
+            
+            setupTabControls();
+            console.log('✓ Tab controls setup');
+            
+            setupModal();
+            console.log('✓ Modal setup');
+            
+            setupHiatusModal();
+            console.log('✓ Hiatus modal setup');
+            
+            setupSixthDayModal();
+            console.log('✓ Sixth day modal setup');
+            
+            setupColumnConfigModal();
+            console.log('✓ Column config modal setup');
+            
+            loadDefaults('hour-long');
+            console.log('✓ Defaults loaded');
+            
+            const appContainer = document.getElementById('app-Dr_g0n-container');
+            if (appContainer && typeof AppDr_g0n !== 'undefined') {
+                appContainer.innerHTML = AppDr_g0n;
+                console.log('✓ App content loaded');
+            } else {
+                console.warn('App container or AppDr_g0n not found');
+            }
+            
+            setupAllEventListeners();
+            console.log('✓ Event listeners setup');
+            
+            setupEnhancedInputListeners();
+            console.log('✓ Enhanced input listeners setup');
+            
+            setupUnlinkToggleListener();
+            console.log('✓ Unlink toggle listener setup');
+            
+            // Delay budget delegation setup slightly
+            setTimeout(() => {
+                setupBudgetEventDelegation();
+                console.log('✓ Budget event delegation setup');
+            }, 100);
+            
+            // Explicit handlers for checkboxes
+            const producersCutsOverlap = document.getElementById('producers-cuts-overlap');
+            if (producersCutsOverlap) {
+                producersCutsOverlap.addEventListener('change', (e) => {
+                    setLastChangedInput(e.target.id);
+                    handleInputChange(e.target);
+                });
+            }
+            
+            const producersCutsPreWrap = document.getElementById('producers-cuts-pre-wrap');
+            if (producersCutsPreWrap) {
+                producersCutsPreWrap.addEventListener('change', (e) => {
+                    setLastChangedInput(e.target.id);
+                    handleInputChange(e.target);
+                });
+            }
+            
+            const toggleSequentialLock = document.getElementById('toggle-sequential-lock');
+            if (toggleSequentialLock) {
+                toggleSequentialLock.addEventListener('change', (e) => {
+                    setLastChangedInput(e.target.id);
+                    handleInputChange(e.target);
+                });
+            }
+            
+            console.log('✓ Checkbox handlers setup');
+            console.log('App initialization complete!');
+            
+        } catch (error) {
+            console.error('Error during app initialization:', error);
+        }
     }
 
     initializeApp();
