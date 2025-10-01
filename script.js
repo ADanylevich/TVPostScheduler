@@ -607,6 +607,7 @@ function validateManualAnchors(manuallySetTasks) {
     function calculateAndRender() {
         calculateSchedule();
         updateBudgetFromSchedule();
+        updateMXEditorWeeks();  // Add this line
         renderAllViews();
     }
 
@@ -654,7 +655,7 @@ function validateManualAnchors(manuallySetTasks) {
             editorialItems.push({ id: generateUUID(), desc: `Assistant Editor ${i+1}`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 3200, fringeType: 'percent', fringeRate: 40 });
         }
         editorialItems.push({ id: generateUUID(), desc: 'VFX Editor', num: 1, prep: 0, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 40 });
-        editorialItems.push({ id: generateUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
+        editorialItems.push({ id: generateUUID(), desc: 'MX Editor', num: 1, prep: 0, shoot: 0, post: numEpisodes * 4, wrap: 0, rate: 5000, fringeType: 'percent', fringeRate: 40 });
 
         const vfxItems = [
             { id: generateUUID(), desc: 'VFX Producer', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 4000, fringeType: 'percent', fringeRate: 25 },
@@ -670,7 +671,7 @@ function validateManualAnchors(manuallySetTasks) {
             { id: generateUUID(), desc: 'VFX Producer Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
             { id: generateUUID(), desc: 'VFX Supervisor Room', num: 1, prep: 4, shoot: 10, post: 20, wrap: 2, rate: 400, fringeType: 'flat', fringeRate: 0 },
             { id: generateUUID(), desc: 'VFX Coordinator Room', num: 1, prep: 2, shoot: 10, post: 20, wrap: 2, rate: 350, fringeType: 'flat', fringeRate: 0 },
-            { id: generateUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
+            { id: generateUUID(), desc: 'MX Editor Room', num: 1, prep: 0, shoot: 0, post: numEpisodes * 4, wrap: 0, rate: 500, fringeType: 'flat', fringeRate: 0 },
         ];
         for (let i = 0; i < numEditors; i++) {
             roomItems.push({ id: generateUUID(), desc: `Editor Bay ${i+1}`, num: 1, prep: 0, shoot: 0, post: 22, wrap: 2, rate: 600, fringeType: 'flat', fringeRate: 0 });
@@ -683,7 +684,7 @@ function validateManualAnchors(manuallySetTasks) {
             equipmentItems.push({ id: generateUUID(), desc: `AVID Rental (Assistant Editor ${i+1})`, num: 1, prep: 2, shoot: 0, post: 22, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
         }
         equipmentItems.push({ id: generateUUID(), desc: 'AVID Rental (VFX Editor)', num: 1, prep: 0, shoot: 0, post: 20, wrap: 2, rate: 650, fringeType: 'flat', fringeRate: 0 });
-        equipmentItems.push({ id: generateUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: 8, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
+        equipmentItems.push({ id: generateUUID(), desc: 'MX Editor Kit Rental', num: 1, prep: 0, shoot: 0, post: numEpisodes * 4, wrap: 0, rate: 1500, fringeType: 'flat', fringeRate: 0 });
 
         budgetData = {
             "Post-Production Staff": staffItems,
@@ -727,7 +728,11 @@ function validateManualAnchors(manuallySetTasks) {
         gridVisibleColumns = getCurrentAllGridColumns();
         renderGridView();
     }
-
+    document.getElementById('num-episodes').addEventListener('change', () => {
+        updateMXEditorWeeks();
+        calculateBudgetTotals();
+        renderBudgetView();
+    });
 // ENHANCED EVENT LISTENER AND GLOBAL CHANGE TRACKING SYSTEM
     
     // Define what constitutes a global change that might affect manual tasks
@@ -3964,7 +3969,7 @@ function setupTabControls() {
                 } else if (category === "Rooms" || category === "Equipment Rentals") {
                     categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Total', 'Labor Link']);
                 } else if (category === "Box Rentals") {
-                    categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Rate', 'Fringe Capped', 'Fringe Cap', 'Total', 'Labor Link']);
+                    categoryData.push(['Description', 'Qty', 'Prep', 'Shoot', 'Post', 'Wrap', 'Total Wks', 'Weekly Rate', 'Mode', 'Cap Amount', 'Total', 'Labor Link']);
                 }
                 currentRow++;
                 
@@ -4170,18 +4175,31 @@ function calculateCategoryTotal(category) {
         const totalWeeks = (item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0);
         const laborTotal = (item.num || 0) * totalWeeks * (item.rate || 0);
         
-        let fringeTotal = 0;
-        if (isStaffCategory || category === "Box Rentals") {
+        if (category === "Box Rentals") {
+            // Box Rentals use their own logic
+            const boxMode = item.boxMode || 'flat';
+            const capAmount = item.capAmount || 500;
+            
+            if (boxMode === 'flat') {
+                // For flat mode, cap the total at the cap amount
+                total += Math.min(laborTotal, capAmount);
+            } else {
+                // For weekly mode, use normal calculation
+                total += laborTotal;
+            }
+        } else if (isStaffCategory) {
+            // Staff categories have fringe calculations
+            let fringeTotal = 0;
             if (item.fringeType === 'percent') {
                 fringeTotal = laborTotal * ((item.fringeRate || 0) / 100);
             } else if (item.fringeType === 'flat') {
                 fringeTotal = (item.fringeRate || 0) * totalWeeks * (item.num || 0);
-            } else if (item.fringeType === 'capped' && category === "Box Rentals") {
-                fringeTotal = Math.min(laborTotal * 0.25, item.fringeRate || 0);
             }
+            total += laborTotal + fringeTotal;
+        } else {
+            // Rooms and Equipment Rentals - no fringe
+            total += laborTotal;
         }
-        
-        total += laborTotal + fringeTotal;
     });
     
     return total;
@@ -4291,16 +4309,15 @@ function calculateCategoryTotal(category) {
                 }
                 budgetData['Box Rentals'].push({
                     id: generateUUID(),
-                    desc: `${desc} Box Rental`,
-                    num: qty,
-                    prep: prep,
-                    shoot: shoot,
-                    post: post,
-                    wrap: wrap,
-                    rate: 0, // User can set this later
-                    fringeType: 'none',
-                    fringeRate: 0,
-                    laborRef: laborItem.id
+                    desc: `Box Rental (${item.desc})`,
+                    num: item.num,
+                    prep: item.prep,
+                    shoot: item.shoot,
+                    post: item.post,
+                    wrap: item.wrap,
+                    rate: 50,
+                    boxMode: 'flat',  // Default to flat mode
+                    capAmount: 500    // Default cap of $500
                 });
             }
             
@@ -4333,6 +4350,31 @@ function calculateCategoryTotal(category) {
             }
         };
     }
+
+    function calculateWeeksOfPost() {
+        const numEpisodes = parseInt(document.getElementById('num-episodes').value) || 0;
+        const editorsField = parseInt(document.getElementById('num-editors').value) || 1;
+        const finishingWeeks = parseInt(document.getElementById('finishing-period-weeks').value) || 0;
+        
+        // Calculate based on post-production phase durations
+        const editorsCutDays = parseInt(document.getElementById('editors-cut-days').value) || 0;
+        const directorsCutDays = parseInt(document.getElementById('directors-cut-days').value) || 0;
+        const producersCutDays = parseInt(document.getElementById('producers-cut-days').value) || 0;
+        const studioNotesDays = parseInt(document.getElementById('studio-notes-days').value) || 0;
+        const networkCutDays = parseInt(document.getElementById('network-cut-days').value) || 0;
+        const pictureLockDays = parseInt(document.getElementById('picture-lock-days').value) || 0;
+        
+        // Total days per episode
+        const daysPerEpisode = editorsCutDays + directorsCutDays + producersCutDays + 
+                               studioNotesDays + networkCutDays + pictureLockDays;
+        
+        // Convert to weeks and account for parallel editing
+        const weeksPerEpisode = daysPerEpisode / 5; // 5 working days per week
+        const totalPostWeeks = (weeksPerEpisode * numEpisodes / editorsField) + finishingWeeks;
+        
+        return Math.ceil(totalPostWeeks);
+    }
+    
     function loadSchedule() {
         const input = document.createElement('input');
         input.type = 'file';
@@ -4993,19 +5035,25 @@ function calculateCategoryTotal(category) {
                             post = Math.ceil(diffBusinessDays(wrapOfPhotography, lastFinalMixFixesDate) / 5);
                         }
                     } else if (item.desc === 'MX Editor') {
-                         if (scheduleType === 'hour-long') {
-                            if (midpointOfShootDate && lastMandEDeliveryDate) {
-                                const totalDays = diffBusinessDays(midpointOfShootDate, lastMandEDeliveryDate);
-                                const shootDays = wrapOfPhotography && midpointOfShootDate < wrapOfPhotography ? diffBusinessDays(midpointOfShootDate, wrapOfPhotography) : 0;
-                                shoot = Math.ceil(shootDays / 5);
-                                post = Math.ceil((totalDays - shootDays) / 5);
-                            }
-                         } else {
-                            shoot = 0;
-                            if (wrapOfPhotography && lastMandEDeliveryDate) {
-                                post = Math.ceil(diffBusinessDays(wrapOfPhotography, lastMandEDeliveryDate) / 5);
-                            }
-                         }
+                        const numEpisodes = parseInt(document.getElementById('num-episodes').value) || 0;
+                        
+                        // Define weeks per episode based on show type
+                        let mxWeeksPerEpisode;
+                        
+                        if (scheduleType === 'hour-long') {
+                            // Hour-long shows: 4 weeks per episode
+                            mxWeeksPerEpisode = 4;
+                        } else if (scheduleType === 'half-hour') {
+                            // Half-hour shows: 2 weeks per episode (adjust as needed)
+                            mxWeeksPerEpisode = 2;
+                        } else {
+                            // Default fallback (if neither hour-long nor half-hour)
+                            mxWeeksPerEpisode = 3;
+                        }
+                        
+                        // MX Editor only works in post, not during shooting
+                        shoot = 0;
+                        post = numEpisodes * mxWeeksPerEpisode;
                     } else if (item.desc === 'VFX Editor') {
                          let startDate;
                          if (scheduleType === 'hour-long') {
@@ -5061,23 +5109,6 @@ function calculateCategoryTotal(category) {
                 });
             }
         });
-
-        const mxEditorData = personnelWeeks['MX Editor'];
-        if (mxEditorData) {
-            const totalEditorWeeks = mxEditorData.prep + mxEditorData.shoot + mxEditorData.post + mxEditorData.wrap;
-            if (budgetData['Equipment Rentals']) {
-                const mxRental = budgetData['Equipment Rentals'].find(item => item.desc === 'MX Editor Kit Rental');
-                if (mxRental) {
-                    personnelWeeks[mxRental.desc] = { prep: 0, shoot: 0, post: totalEditorWeeks, wrap: 0 };
-                }
-            }
-            if (budgetData['Rooms']) {
-                const mxRoomRental = budgetData['Rooms'].find(item => item.desc === 'MX Editor Room');
-                if (mxRoomRental) {
-                    personnelWeeks[mxRoomRental.desc] = { prep: 0, shoot: 0, post: totalEditorWeeks, wrap: 0 };
-                }
-            }
-        }
 
         for (const category in budgetData) {
             budgetData[category].forEach(item => {
@@ -5274,6 +5305,35 @@ function calculateCategoryTotal(category) {
             }
         }
     }
+    function updateMXEditorWeeks() {
+        const numEpisodes = parseInt(document.getElementById('num-episodes').value) || 0;
+        const mxWeeksPerEpisode = 4;
+        const totalMXWeeks = numEpisodes * mxWeeksPerEpisode;  // Use totalMXWeeks here
+        
+        // Update MX Editor in Editorial Staff
+        if (budgetData['Editorial Staff']) {
+            const mxEditor = budgetData['Editorial Staff'].find(item => item.desc === 'MX Editor');
+            if (mxEditor) {
+                mxEditor.post = totalMXWeeks;  // Use totalMXWeeks here
+            }
+        }
+        
+        // Update MX Editor Room
+        if (budgetData['Rooms']) {
+            const mxRoom = budgetData['Rooms'].find(item => item.desc === 'MX Editor Room');
+            if (mxRoom) {
+                mxRoom.post = totalMXWeeks;  // Use totalMXWeeks here
+            }
+        }
+        
+        // Update MX Editor Kit Rental
+        if (budgetData['Equipment Rentals']) {
+            const mxKit = budgetData['Equipment Rentals'].find(item => item.desc === 'MX Editor Kit Rental');
+            if (mxKit) {
+                mxKit.post = totalMXWeeks;  // Use totalMXWeeks here
+            }
+        }
+    }
     function renderBudgetItem(tbody, item, category, isLabor) {
         const row = document.createElement('tr');
         row.dataset.id = item.id;
@@ -5326,12 +5386,12 @@ function calculateCategoryTotal(category) {
                 <td><span id="budget-total-weeks-${item.id}">${((item.prep || 0) + (item.shoot || 0) + (item.post || 0) + (item.wrap || 0)).toFixed(2)}</span></td>
                 <td><input type="number" class="budget-input" id="budget-rate-${item.id}" value="${item.rate || 0}" min="0" step="50" /></td>
                 <td>
-                    <select class="budget-input" id="budget-fringeType-${item.id}">
-                        <option value="none" ${item.fringeType === 'none' ? 'selected' : ''}>None</option>
-                        <option value="capped" ${item.fringeType === 'capped' ? 'selected' : ''}>Capped</option>
+                    <select class="budget-input" id="budget-boxMode-${item.id}">
+                        <option value="flat" ${item.boxMode === 'flat' ? 'selected' : ''}>Flat</option>
+                        <option value="weekly" ${item.boxMode === 'weekly' ? 'selected' : ''}>Weekly</option>
                     </select>
                 </td>
-                <td><input type="number" class="budget-input" id="budget-fringeRate-${item.id}" value="${item.fringeRate || 0}" min="0" step="50" /></td>
+                <td><input type="number" class="budget-input" id="budget-capAmount-${item.id}" value="${item.capAmount || 500}" min="0" step="100" /></td>
                 <td><span id="budget-line-total-${item.id}">$0.00</span></td>
                 <td><button class="delete-budget-item" data-id="${item.id}" data-category="${category}">Delete</button></td>
             `;
@@ -5379,13 +5439,32 @@ function calculateCategoryTotal(category) {
         }
     }
     function renderBudgetView() {
-        
         const budgetView = document.getElementById('budget-view');
         budgetView.innerHTML = '';
         
         const budgetContent = document.createElement('div');
         budgetContent.className = 'budget-content';
         
+        // Get number of episodes and calculate weeks of post
+        const numEpisodes = parseInt(document.getElementById('num-episodes').value) || 0;
+        const finishingWeeks = parseInt(document.getElementById('finishing-period-weeks').value) || 0;
+        const postWeeks = calculateWeeksOfPost();
+        
+        // Add grand total at the TOP - PROMINENT DISPLAY
+        const grandTotalSection = document.createElement('div');
+        grandTotalSection.className = 'budget-grand-total-top';
+        grandTotalSection.innerHTML = `
+            <div class="grand-total-header">
+                <h2>GROSS BUDGET (pre-incentives)</h2>
+                <div class="production-info">
+                    <span class="info-item">${numEpisodes} Episodes</span>
+                    <span class="info-separator">•</span>
+                    <span class="info-item">${postWeeks} Weeks of Post</span>
+                </div>
+            </div>
+            <div class="grand-total-amount" id="grand-total-top">$0.00</div>
+        `;
+        budgetContent.appendChild(grandTotalSection);
         // Use EXACT category names from loadDefaults
         const categories = [
             { key: "Post-Production Staff", displayName: "Post-Production Staff", isLabor: true },
@@ -5396,7 +5475,6 @@ function calculateCategoryTotal(category) {
             { key: "Box Rentals", displayName: "Box Rentals", isLabor: false }
         ];
         
-        // Rest of the function remains the same...
         categories.forEach(({ key, displayName, isLabor }) => {
             const categorySection = document.createElement('div');
             categorySection.className = 'budget-category-table';
@@ -5404,20 +5482,41 @@ function calculateCategoryTotal(category) {
             
             const categoryHeader = document.createElement('div');
             categoryHeader.className = 'budget-category-header';
-            categoryHeader.innerHTML = `
-                <h2>${displayName}</h2>
-                <div class="category-controls">
-                    ${isLabor ? `<button class="add-labor-btn" data-category="${key}">+ Add ${displayName.replace(' Staff', '')}</button>` : ''}
-                    <span class="category-subtotal" id="subtotal-${key.replace(/\s+/g, '-')}">$0.00</span>
-                </div>
-            `;
+            
+            // Enhanced header with totals displayed prominently
+if (isLabor) {
+    // Labor sections get the Add Line Item button
+    categoryHeader.innerHTML = `
+        <div class="category-title-row">
+            <h2>${displayName}</h2>
+            <div class="category-totals">
+                <span class="labor-subtotal">Labor: <strong id="labor-subtotal-${key.replace(/\s+/g, '-')}">$0.00</strong></span>
+                <span class="fringe-subtotal">Fringe: <strong id="fringe-subtotal-${key.replace(/\s+/g, '-')}">$0.00</strong></span>
+                <span class="category-total">Total: <strong id="subtotal-${key.replace(/\s+/g, '-')}">$0.00</strong></span>
+            </div>
+        </div>
+        <div class="category-controls">
+            <button class="add-labor-btn" data-category="${key}">+ Add Line Item</button>
+        </div>
+    `;
+} else {
+    // Non-labor sections (Rooms, Equipment, Box Rentals) - NO Add Line Item button
+    categoryHeader.innerHTML = `
+        <div class="category-title-row">
+            <h2>${displayName}</h2>
+            <div class="category-totals">
+                <span class="category-total">Total: <strong id="subtotal-${key.replace(/\s+/g, '-')}">$0.00</strong></span>
+            </div>
+        </div>
+    `;
+}
+            
             categorySection.appendChild(categoryHeader);
             
+            // Rest of the table creation remains the same
             const table = document.createElement('table');
-            table.className = 'budget-table';
-            table.id = `budget-table-${key.replace(/\s+/g, '-')}`;
-            
             const thead = document.createElement('thead');
+            
             if (isLabor) {
                 thead.innerHTML = `
                     <tr>
@@ -5462,9 +5561,9 @@ function calculateCategoryTotal(category) {
                         <th>Post</th>
                         <th>Wrap</th>
                         <th>Total Weeks</th>
-                        <th>Rate</th>
-                        <th>Fringe Capped</th>
-                        <th>Fringe Cap</th>
+                        <th>Weekly Rate</th>
+                        <th>Mode</th>
+                        <th>Cap Amount</th>
                         <th>Total</th>
                         <th></th>
                     </tr>
@@ -5487,15 +5586,6 @@ function calculateCategoryTotal(category) {
             categorySection.appendChild(table);
             budgetContent.appendChild(categorySection);
         });
-        
-        // Add grand total
-        const grandTotalSection = document.createElement('div');
-        grandTotalSection.className = 'budget-grand-total';
-        grandTotalSection.innerHTML = `
-            <h3>Grand Total</h3>
-            <span id="grand-total">$0.00</span>
-        `;
-        budgetContent.appendChild(grandTotalSection);
         
         budgetView.appendChild(budgetContent);
         
@@ -5524,20 +5614,23 @@ function calculateCategoryTotal(category) {
         
         // Use EXACT category names
         const staffCategories = ["Post-Production Staff", "Editorial Staff", "VFX Staff"];
-    
+        
         document.querySelectorAll('.budget-category-table').forEach(table => {
             let categorySubtotal = 0;
+            let categoryLaborTotal = 0;
+            let categoryFringeTotal = 0;
+            
             const categoryHeader = table.querySelector('h2');
             if (!categoryHeader) return;
             
             const categoryName = categoryHeader.textContent;
             const categoryKey = categoryName.replace(/\s+/g, '-');
             const isStaffCategory = staffCategories.includes(categoryName);
-    
+            
             table.querySelectorAll('tbody tr').forEach(row => {
                 const id = row.dataset.id;
                 if (!id) return;
-    
+                
                 // Check if elements exist before trying to read their values
                 const numEl = document.getElementById(`budget-num-${id}`);
                 const prepEl = document.getElementById(`budget-prep-${id}`);
@@ -5549,24 +5642,24 @@ function calculateCategoryTotal(category) {
                 if (!numEl || !prepEl || !shootEl || !postEl || !wrapEl || !rateEl) {
                     return; // Skip if any required element is missing
                 }
-    
+                
                 const num = parseFloat(numEl.value) || 0;
                 const prep = parseFloat(prepEl.value) || 0;
                 const shoot = parseFloat(shootEl.value) || 0;
                 const post = parseFloat(postEl.value) || 0;
                 const wrap = parseFloat(wrapEl.value) || 0;
                 const rate = parseFloat(rateEl.value) || 0;
-    
+                
                 const totalWeeks = prep + shoot + post + wrap;
                 const laborTotal = num * totalWeeks * rate;
                 let fringeTotal = 0;
                 let lineTotal = 0;
-    
+                
                 if (categoryName === "Rooms" || categoryName === "Equipment Rentals") {
                     // Rooms and Equipment Rentals don't have fringe
                     lineTotal = laborTotal;
-                } else if (isStaffCategory || categoryName === "Box Rentals") {
-                    // Staff categories and Box Rentals have fringe calculations
+                } else if (isStaffCategory) {
+                    // Staff categories have fringe calculations
                     const fringeTypeEl = document.getElementById(`budget-fringeType-${id}`);
                     const fringeRateEl = document.getElementById(`budget-fringeRate-${id}`);
                     
@@ -5578,37 +5671,40 @@ function calculateCategoryTotal(category) {
                             fringeTotal = laborTotal * (fringeRate / 100);
                         } else if (fringeType === 'flat') {
                             fringeTotal = num * totalWeeks * fringeRate;
-                        } else if (fringeType === 'capped') {
-                            const cap = fringeRate;
-                            fringeTotal = Math.min(laborTotal * 0.25, cap * num);
                         }
                     }
                     
-                    // Calculate line total differently for Box Rentals vs Staff categories
-                    if (categoryName === "Box Rentals") {
-                        const fringeTypeEl = document.getElementById(`budget-fringeType-${id}`);
-                        if (fringeTypeEl && fringeTypeEl.value === 'capped') {
-                            // For capped box rentals, add the capped fringe to labor total
-                            lineTotal = laborTotal + fringeTotal;
-                        } else {
-                            lineTotal = laborTotal;
-                        }
-                    } else if (isStaffCategory) {
-                        // For staff categories, always add fringe to labor
-                        lineTotal = laborTotal + fringeTotal;
-                    }
+                    // For staff categories, always add fringe to labor
+                    lineTotal = laborTotal + fringeTotal;
+                    
+                    // Add to category labor and fringe totals
+                    categoryLaborTotal += laborTotal;
+                    categoryFringeTotal += fringeTotal;
                     
                     // Update the labor and fringe total display elements
                     const laborTotalEl = document.getElementById(`budget-labor-total-${id}`);
                     const fringeTotalEl = document.getElementById(`budget-fringe-total-${id}`);
                     if (laborTotalEl) laborTotalEl.textContent = currencyFormat.format(laborTotal);
                     if (fringeTotalEl) fringeTotalEl.textContent = currencyFormat.format(fringeTotal);
+                    
+                } else if (categoryName === "Box Rentals") {
+                    // Box Rentals have their own calculation logic
+                    const boxModeEl = document.getElementById(`budget-boxMode-${id}`);
+                    const capAmountEl = document.getElementById(`budget-capAmount-${id}`);
+                    
+                    const boxMode = boxModeEl ? boxModeEl.value : 'flat';
+                    const capAmount = parseFloat(capAmountEl ? capAmountEl.value : 500) || 500;
+                    
+                    if (boxMode === 'flat') {
+                        lineTotal = Math.min(laborTotal, capAmount);
+                    } else {
+                        lineTotal = laborTotal;
+                    }
                 } else {
-                    // Any other categories (shouldn't happen with our defined categories)
                     lineTotal = laborTotal;
                 }
-    
-                // Safely update the total weeks and line total elements
+                
+                // Update the total weeks and line total elements
                 const totalWeeksEl = document.getElementById(`budget-total-weeks-${id}`);
                 const lineTotalEl = document.getElementById(`budget-line-total-${id}`);
                 
@@ -5618,11 +5714,24 @@ function calculateCategoryTotal(category) {
                 if (lineTotalEl) {
                     lineTotalEl.textContent = currencyFormat.format(lineTotal);
                 }
-    
+                
                 categorySubtotal += lineTotal;
             });
-    
-            // Safely update subtotal
+            
+            // Update category totals in the header
+            if (isStaffCategory) {
+                // Update labor and fringe subtotals for staff categories
+                const laborSubtotalEl = document.getElementById(`labor-subtotal-${categoryKey}`);
+                const fringeSubtotalEl = document.getElementById(`fringe-subtotal-${categoryKey}`);
+                if (laborSubtotalEl) {
+                    laborSubtotalEl.textContent = currencyFormat.format(categoryLaborTotal);
+                }
+                if (fringeSubtotalEl) {
+                    fringeSubtotalEl.textContent = currencyFormat.format(categoryFringeTotal);
+                }
+            }
+            
+            // Update the category total
             const subtotalEl = document.getElementById(`subtotal-${categoryKey}`);
             if (subtotalEl) {
                 subtotalEl.textContent = currencyFormat.format(categorySubtotal);
@@ -5630,9 +5739,14 @@ function calculateCategoryTotal(category) {
             
             grandTotal += categorySubtotal;
         });
-    
-        // Safely update grand total
+        
+        // Update both the top grand total and any other grand total element
+        const grandTotalTopEl = document.getElementById('grand-total-top');
         const grandTotalEl = document.getElementById('grand-total');
+        
+        if (grandTotalTopEl) {
+            grandTotalTopEl.textContent = currencyFormat.format(grandTotal);
+        }
         if (grandTotalEl) {
             grandTotalEl.textContent = currencyFormat.format(grandTotal);
         }
